@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs & artifacts
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment variables & secrets
+.env*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+id_rsa*
+*.secret
+
+# Database & Local Persistence Files
+.data/
+server/data/
+*.db
+*.sqlite
+*.sqlite3
+smart_campus_bus_offline*
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,73 @@
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AppProvider } from './store/AppContext';
+import { AppShell } from './components/layout/AppShell';
+
+// Auth
+import { LoginPage } from './pages/auth/LoginPage';
+
+// Student
+import { StudentDashboard } from './pages/student/StudentDashboard';
+import { StudentLiveBuses } from './pages/student/StudentLiveBuses';
+import { StudentRoutes } from './pages/student/StudentRoutes';
+import { StudentNotifications } from './pages/student/StudentNotifications';
+import { StudentProfile } from './pages/student/StudentProfile';
+
+// Driver
+import { DriverDashboard } from './pages/driver/DriverDashboard';
+import { DriverHistory } from './pages/driver/DriverHistory';
+import { DriverProfile } from './pages/driver/DriverProfile';
+
+// Admin
+import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { AdminLiveFleet } from './pages/admin/AdminLiveFleet';
+import { AdminBuses } from './pages/admin/AdminBuses';
+import { AdminRoutes } from './pages/admin/AdminRoutes';
+import { AdminDirectory } from './pages/admin/AdminDirectory';
+import { AdminAlerts } from './pages/admin/AdminAlerts';
+import { AdminAnalytics } from './pages/admin/AdminAnalytics';
+import { AdminSettings } from './pages/admin/AdminSettings';
+
+export default function App() {
+  return (
+    <AppProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Public Auth */}
+          <Route path="/login" element={<LoginPage />} />
+
+          {/* Protected Application Workspace */}
+          <Route element={<AppShell />}>
+            {/* Student Routes */}
+            <Route path="/student" element={<StudentDashboard />} />
+            <Route path="/student/live" element={<StudentLiveBuses />} />
+            <Route path="/student/routes" element={<StudentRoutes />} />
+            <Route path="/student/notifications" element={<StudentNotifications />} />
+            <Route path="/student/profile" element={<StudentProfile />} />
+
+            {/* Driver Routes */}
+            <Route path="/driver" element={<DriverDashboard />} />
+            <Route path="/driver/history" element={<DriverHistory />} />
+            <Route path="/driver/profile" element={<DriverProfile />} />
+
+            {/* Admin Routes */}
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/fleet" element={<AdminLiveFleet />} />
+            <Route path="/admin/buses" element={<AdminBuses />} />
+            <Route path="/admin/routes" element={<AdminRoutes />} />
+            <Route path="/admin/directory" element={<AdminDirectory />} />
+            <Route path="/admin/alerts" element={<AdminAlerts />} />
+            <Route path="/admin/analytics" element={<AdminAnalytics />} />
+            <Route path="/admin/settings" element={<AdminSettings />} />
+
+            {/* Default Route */}
+            <Route path="/" element={<Navigate to="/student" replace />} />
+          </Route>
+
+          {/* Catch-all fallback */}
+          <Route path="*" element={<Navigate to="/student" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AppProvider>
+  );
+}
