@@ -1,24 +1,19 @@
 import { Bus, EmergencyAlert, CampusNotification } from '../types';
 import { apiClient } from './apiClient';
 import { socketService } from './socketService';
-import { mockBuses } from '../mock/buses';
 
 type BusUpdateListener = (buses: Bus[]) => void;
 type EmergencyListener = (alert: EmergencyAlert) => void;
 type NotificationListener = (notif: CampusNotification) => void;
 
 class RealtimeService {
-  private buses: Bus[] = [...mockBuses];
+  private buses: Bus[] = [];
   private busListeners: BusUpdateListener[] = [];
   private emergencyListeners: EmergencyListener[] = [];
   private notificationListeners: NotificationListener[] = [];
-  private simulationInterval: number | null = null;
   private isConnectedToBackend = false;
 
   constructor() {
-    // Initial fetch from backend API
-    this.fetchBusesFromApi();
-
     // Listen to real-time events via Socket.IO
     socketService.on('bus:updated', (updatedBus: Bus) => {
       this.handleBusUpdated(updatedBus);
@@ -40,10 +35,6 @@ class RealtimeService {
       this.emergencyListeners.forEach((l) => l(alert));
     });
 
-    socketService.on('emergency:status', (data: any) => {
-      // Re-trigger alert listeners or fetch
-    });
-
     socketService.on('notification:new', (notif: CampusNotification) => {
       this.notificationListeners.forEach((l) => l(notif));
     });
@@ -59,13 +50,13 @@ class RealtimeService {
   public async fetchBusesFromApi(): Promise<Bus[]> {
     try {
       const data = await apiClient.get<Bus[]>('/api/buses');
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         this.buses = data;
         this.notifyBusListeners();
         return this.buses;
       }
     } catch (err) {
-      console.warn('Could not fetch buses from API, using cached state:', err);
+      console.warn('Could not fetch buses from API:', err);
     }
     return this.buses;
   }
@@ -98,20 +89,6 @@ class RealtimeService {
     return () => {
       this.notificationListeners = this.notificationListeners.filter((l) => l !== listener);
     };
-  }
-
-  public updateBusFromDriver(busId: string, updates: Partial<Bus>): void {
-    this.buses = this.buses.map((b) => {
-      if (b.id === busId) {
-        return {
-          ...b,
-          ...updates,
-          lastSyncTimestamp: new Date().toISOString(),
-        };
-      }
-      return b;
-    });
-    this.notifyBusListeners();
   }
 
   public broadcastEmergency(alert: EmergencyAlert): void {
