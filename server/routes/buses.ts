@@ -6,6 +6,19 @@ import { broadcastBusUpdate } from '../socket';
 
 const router = Router();
 
+export const ALLOWED_BUS_STATUSES = ['ACTIVE', 'IDLE', 'MAINTENANCE', 'OFFLINE', 'OFF_DUTY', 'OUT_OF_SERVICE'];
+
+export function normalizeBusStatus(status?: string): 'ACTIVE' | 'IDLE' | 'MAINTENANCE' | 'OFFLINE' | undefined {
+  if (!status) return undefined;
+  const upper = status.toUpperCase().trim();
+  if (upper === 'OFF_DUTY') return 'IDLE';
+  if (upper === 'OUT_OF_SERVICE') return 'OFFLINE';
+  if (['ACTIVE', 'IDLE', 'MAINTENANCE', 'OFFLINE'].includes(upper)) {
+    return upper as 'ACTIVE' | 'IDLE' | 'MAINTENANCE' | 'OFFLINE';
+  }
+  return undefined;
+}
+
 // GET /api/buses (Multi-Tenant, Scoped to College)
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -42,7 +55,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response): P
         routeColor: route?.color,
         currentDriverId: bus.current_driver_id,
         driverName: bus.driver_name,
-        status: bus.status,
+        status: normalizeBusStatus(bus.status) || 'IDLE',
         lastLocation: {
           lat: bus.last_location_lat,
           lng: bus.last_location_lng,
@@ -99,6 +112,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response)
 
     res.json({
       ...bus,
+      status: normalizeBusStatus(bus.status) || 'IDLE',
       etaConfidence: confidence,
       upcomingEtas: calculatedEtas,
     });
@@ -118,6 +132,13 @@ router.post('/', requireAuth, requireRole(['ADMIN']), async (req: AuthenticatedR
       return;
     }
 
+    if (status && !ALLOWED_BUS_STATUSES.includes(status)) {
+      res.status(400).json({
+        error: `Invalid bus status: "${status}". Allowed values: ACTIVE, IDLE, MAINTENANCE, OFFLINE.`,
+      });
+      return;
+    }
+
     const college = await db.getCollegeById(collegeId);
     const centerLat = college?.center_lat || 34.0537;
     const centerLng = college?.center_lng || -118.2570;
@@ -130,7 +151,7 @@ router.post('/', requireAuth, requireRole(['ADMIN']), async (req: AuthenticatedR
       capacity: Number(capacity) || 45,
       model: model?.trim() || 'Standard Transit Bus',
       current_route_id: currentRouteId || undefined,
-      status: status || 'OFF_DUTY',
+      status: normalizeBusStatus(status) || 'IDLE',
       last_location_lat: centerLat,
       last_location_lng: centerLng,
       heading: 0,
@@ -165,7 +186,16 @@ router.put('/:id', requireAuth, requireRole(['ADMIN']), async (req: Authenticate
     if (req.body.capacity) updates.capacity = Number(req.body.capacity);
     if (req.body.model) updates.model = req.body.model;
     if (req.body.currentRouteId !== undefined) updates.current_route_id = req.body.currentRouteId;
-    if (req.body.status) updates.status = req.body.status;
+    if (req.body.status !== undefined) {
+      const normalized = normalizeBusStatus(req.body.status);
+      if (!normalized) {
+        res.status(400).json({
+          error: `Invalid bus status: "${req.body.status}". Allowed values: ACTIVE, IDLE, MAINTENANCE, OFFLINE.`,
+        });
+        return;
+      }
+      updates.status = normalized;
+    }
 
     const updated = await db.updateBus(busId, collegeId, updates);
     if (!updated) {

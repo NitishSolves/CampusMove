@@ -69,6 +69,8 @@ export interface StopRecord {
   created_at: string;
 }
 
+export type BusStatus = 'ACTIVE' | 'IDLE' | 'MAINTENANCE' | 'OFFLINE' | 'OFF_DUTY' | 'OUT_OF_SERVICE';
+
 export interface BusRecord {
   id: string;
   college_id: string;
@@ -79,7 +81,7 @@ export interface BusRecord {
   current_route_id?: string;
   current_driver_id?: string;
   driver_name?: string;
-  status: 'ACTIVE' | 'MAINTENANCE' | 'OFF_DUTY' | 'OUT_OF_SERVICE';
+  status: BusStatus;
   last_location_lat: number;
   last_location_lng: number;
   heading: number;
@@ -554,7 +556,7 @@ export async function seedInitialData() {
       capacity: 55,
       model: 'New Flyer Xcelsior 60ft Articulated',
       current_route_id: 'route_green',
-      status: 'SCHEDULED' as any,
+      status: 'IDLE',
       last_location_lat: 34.0505,
       last_location_lng: -118.2540,
       heading: 45,
@@ -594,7 +596,7 @@ export async function seedInitialData() {
       plate_number: 'CA-9MPU01',
       capacity: 35,
       model: 'Gillig Low Floor 35ft',
-      status: 'OFF_DUTY',
+      status: 'IDLE',
       last_location_lat: 37.7749,
       last_location_lng: -122.4194,
       heading: 0,
@@ -769,8 +771,13 @@ export async function initDatabase(): Promise<{ isPostgres: boolean }> {
         console.warn('PostgreSQL schema.sql could not be located in candidate paths:', possibleSchemaPaths);
       }
 
-      // Seed initial data into PostgreSQL (idempotent ON CONFLICT DO NOTHING)
-      await seedPostgresData(client);
+      // In production mode, do not seed demo fleet data on startup (preserve real production data).
+      // Only seed initial demo data in non-production environments (development/test) or if explicitly requested.
+      if (!isProduction || process.env.SEED_INITIAL_DATA === 'true') {
+        await seedPostgresData(client);
+      } else {
+        console.log('Production mode active: startup demo fleet seeding skipped to preserve institutional integrity.');
+      }
 
       client.release();
       return { isPostgres: true };
@@ -818,7 +825,7 @@ export async function checkDatabaseHealth(): Promise<{ healthy: boolean; databas
 }
 
 // Helper to seed into Postgres when connected
-async function seedPostgresData(client: pg.PoolClient) {
+export async function seedPostgresData(client: pg.PoolClient) {
   await seedInitialData(); // Populate memoryData first
 
   for (const col of memoryData.colleges) {

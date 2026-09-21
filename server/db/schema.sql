@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS buses (
     current_route_id VARCHAR(64) REFERENCES routes(id) ON DELETE SET NULL,
     current_driver_id VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
     driver_name VARCHAR(255),
-    status VARCHAR(32) NOT NULL DEFAULT 'OFF_DUTY',
+    status VARCHAR(32) NOT NULL DEFAULT 'IDLE' CHECK (status IN ('ACTIVE', 'IDLE', 'MAINTENANCE', 'OFFLINE', 'OFF_DUTY', 'OUT_OF_SERVICE')),
     last_location_lat DOUBLE PRECISION NOT NULL DEFAULT 34.0537,
     last_location_lng DOUBLE PRECISION NOT NULL DEFAULT -118.2570,
     heading DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -89,6 +89,21 @@ CREATE TABLE IF NOT EXISTS buses (
 );
 CREATE INDEX IF NOT EXISTS idx_buses_college ON buses(college_id);
 CREATE INDEX IF NOT EXISTS idx_buses_route ON buses(current_route_id);
+
+-- Safe, idempotent normalization and constraint enforcement for existing tables
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'buses') THEN
+        -- Normalize any incompatible or legacy status values
+        UPDATE buses SET status = 'IDLE' WHERE status IN ('OFF_DUTY', 'SCHEDULED', 'IDLE_OFFLINE');
+        UPDATE buses SET status = 'OFFLINE' WHERE status = 'OUT_OF_SERVICE';
+        
+        -- Align buses_status_check constraint to permit canonical and legacy statuses safely
+        ALTER TABLE buses DROP CONSTRAINT IF EXISTS buses_status_check;
+        ALTER TABLE buses ADD CONSTRAINT buses_status_check 
+            CHECK (status IN ('ACTIVE', 'IDLE', 'MAINTENANCE', 'OFFLINE', 'OFF_DUTY', 'OUT_OF_SERVICE'));
+    END IF;
+END $$;
 
 -- 6. Trips (Lifecycle: STARTED -> IN_PROGRESS -> COMPLETED / CANCELLED)
 CREATE TABLE IF NOT EXISTS trips (

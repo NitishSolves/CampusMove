@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
-import { seedInitialData } from './index';
+import { seedInitialData, seedPostgresData } from './index';
 
 const { Pool } = pg;
 
@@ -49,6 +49,7 @@ async function runMigration() {
     if (parseInt(res.rows[0].count, 10) === 0) {
       console.log('Seeding initial college & fleet records...');
       await seedInitialData();
+      await seedPostgresData(client);
     }
   } catch (err) {
     console.error('Migration error:', err);

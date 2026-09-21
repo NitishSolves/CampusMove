@@ -34,7 +34,7 @@ export function determineConfidence(
   busStatus: string,
   isSimulated: boolean = false
 ): ETAConfidence {
-  if (busStatus === 'MAINTENANCE' || busStatus === 'OUT_OF_SERVICE') {
+  if (busStatus === 'MAINTENANCE' || busStatus === 'OUT_OF_SERVICE' || busStatus === 'OFFLINE') {
     return 'OFFLINE';
   }
 
