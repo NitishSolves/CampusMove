@@ -119,8 +119,13 @@ class TripService {
 
       return newTrip;
     } catch (err: any) {
+      // Re-throw 409 Conflict or 400 Bad Request directly to prevent inconsistent local state
+      if (err.status === 409 || err.status === 400 || err.status === 404) {
+        throw err;
+      }
+
       console.warn('Backend start trip error, using client fallback:', err);
-      // Fallback
+      // Fallback only for offline/network connectivity loss
       const fallbackTrip: Trip = {
         id: 'trip_' + Date.now().toString(),
         collegeId,

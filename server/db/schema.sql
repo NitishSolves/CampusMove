@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS buses (
     current_route_id VARCHAR(64) REFERENCES routes(id) ON DELETE SET NULL,
     current_driver_id VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
     driver_name VARCHAR(255),
-    status VARCHAR(32) NOT NULL DEFAULT 'OFF_DUTY' CHECK (status IN ('ACTIVE', 'MAINTENANCE', 'OFF_DUTY', 'OUT_OF_SERVICE')),
+    status VARCHAR(32) NOT NULL DEFAULT 'OFF_DUTY',
     last_location_lat DOUBLE PRECISION NOT NULL DEFAULT 34.0537,
     last_location_lng DOUBLE PRECISION NOT NULL DEFAULT -118.2570,
     heading DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS buses (
     current_occupancy INTEGER NOT NULL DEFAULT 0,
     gps_status VARCHAR(32) NOT NULL DEFAULT 'GPS_ACTIVE',
     network_status VARCHAR(32) NOT NULL DEFAULT 'NETWORK_ONLINE',
-    eta_confidence VARCHAR(32) NOT NULL DEFAULT 'SCHEDULED' CHECK (eta_confidence IN ('LIVE', 'DEGRADED', 'STALE', 'OFFLINE', 'SCHEDULED')),
+    eta_confidence VARCHAR(32) NOT NULL DEFAULT 'SCHEDULED',
     is_simulated BOOLEAN NOT NULL DEFAULT false,
     last_sync_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -111,11 +111,14 @@ CREATE TABLE IF NOT EXISTS trips (
 CREATE INDEX IF NOT EXISTS idx_trips_college ON trips(college_id);
 CREATE INDEX IF NOT EXISTS idx_trips_bus ON trips(bus_id);
 CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id);
+-- Unique constraint to prevent race condition on concurrent active trips
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_trip_per_bus ON trips(bus_id) WHERE status IN ('STARTED', 'IN_PROGRESS');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_trip_per_driver ON trips(driver_id) WHERE status IN ('STARTED', 'IN_PROGRESS');
 
 -- 7. Locations (Raw GPS breadcrumbs from driver phone)
 CREATE TABLE IF NOT EXISTS locations (
     id VARCHAR(64) PRIMARY KEY,
-    trip_id VARCHAR(64) NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    trip_id VARCHAR(64) REFERENCES trips(id) ON DELETE SET NULL,
     bus_id VARCHAR(64) NOT NULL REFERENCES buses(id) ON DELETE CASCADE,
     college_id VARCHAR(64) NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
     lat DOUBLE PRECISION NOT NULL,
@@ -160,8 +163,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     route_id VARCHAR(64) REFERENCES routes(id) ON DELETE SET NULL,
     title VARCHAR(255) NOT NULL,
     message TEXT NOT NULL,
-    category VARCHAR(32) NOT NULL DEFAULT 'ANNOUNCEMENT' CHECK (category IN ('ANNOUNCEMENT', 'DELAY', 'ROUTE_CHANGE', 'EMERGENCY')),
-    priority VARCHAR(32) NOT NULL DEFAULT 'NORMAL' CHECK (priority IN ('NORMAL', 'HIGH', 'URGENT')),
+    category VARCHAR(32) NOT NULL DEFAULT 'ANNOUNCEMENT' CHECK (category IN ('ANNOUNCEMENT', 'DELAY', 'ROUTE_CHANGE', 'EMERGENCY', 'CANCELLATION', 'WEATHER_DELAY')),
+    priority VARCHAR(32) NOT NULL DEFAULT 'NORMAL' CHECK (priority IN ('LOW', 'NORMAL', 'HIGH', 'URGENT', 'EMERGENCY')),
     timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_read BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

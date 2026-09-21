@@ -98,6 +98,17 @@ async function runAllTests() {
     });
     const meData = await meRes.json() as any;
     assert('Authentication', 'Profile endpoint verifies JWT and returns student info', meRes.status === 200 && meData.user?.id === 'usr_student_alex');
+
+    // P0: Verify /api/auth/switch-role is disabled/forbidden/removed
+    const switchRoleRes = await fetch(`${BASE_URL}/api/auth/switch-role`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${studentToken}`,
+      },
+      body: JSON.stringify({ role: 'ADMIN' }),
+    });
+    assert('P0 Security', '/api/auth/switch-role is blocked (404 Not Found or 403 Forbidden)', switchRoleRes.status === 404 || switchRoleRes.status === 403);
   } catch (err: any) {
     assert('Authentication', 'Authentication flow completed', false, err.message);
   }
@@ -200,6 +211,17 @@ async function runAllTests() {
     assert('Trip Lifecycle', 'Driver can start trip (201 Created)', startRes.status === 201 && !!startData.trip?.id);
     testTripId = startData.trip?.id;
 
+    // P0: Verify another user cannot start trip on the same bus while trip is active
+    const conflictRes = await fetch(`${BASE_URL}/api/trips/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({ busId: 'bus_104', routeId: 'route_blue' }),
+    });
+    assert('P0 Security', 'Conflict returned when starting trip on bus already in active trip (409 Conflict)', conflictRes.status === 409);
+
     // Check active trip endpoint
     const activeRes = await fetch(`${BASE_URL}/api/trips/active`, {
       headers: { Authorization: `Bearer ${driverToken}` },
@@ -248,6 +270,35 @@ async function runAllTests() {
 
   // 6. Real GPS Location & Duplicate Prevention
   try {
+    // P0: Coordinate validation checks
+    const badLatRes = await fetch(`${BASE_URL}/api/driver/location`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${driverToken}`,
+      },
+      body: JSON.stringify({
+        busId: 'bus_104',
+        lat: 195.0, // Invalid: latitude > 90
+        lng: -118.2570,
+      }),
+    });
+    assert('P0 Validation', 'Invalid latitude (>90) rejected with 400 Bad Request', badLatRes.status === 400);
+
+    const badLngRes = await fetch(`${BASE_URL}/api/driver/location`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${driverToken}`,
+      },
+      body: JSON.stringify({
+        busId: 'bus_104',
+        lat: 34.0537,
+        lng: 200.0, // Invalid: longitude > 180
+      }),
+    });
+    assert('P0 Validation', 'Invalid longitude (>180) rejected with 400 Bad Request', badLngRes.status === 400);
+
     const fixedLocationId = 'loc_test_fixed_' + Date.now();
     const fixedTimestamp = '2026-09-20T05:00:00.000Z';
 
@@ -563,20 +614,77 @@ async function runAllTests() {
     assert('ETA Confidence', 'ETA confidence check completed', false, err.message);
   }
 
-  // 11. Socket.IO Real-time Events
+  // 11. Socket.IO Real-time Events & Authorization
+  // 11a. Unauthenticated Socket connection should be rejected
+  await new Promise<void>((resolve) => {
+    try {
+      const unauthSocket = io(BASE_URL, {
+        transports: ['websocket', 'polling'],
+        reconnection: false,
+        timeout: 2000,
+      });
+
+      unauthSocket.on('connect', () => {
+        assert('P0 Socket Auth', 'Unauthenticated socket rejected', false, 'Socket connected without token');
+        unauthSocket.disconnect();
+        resolve();
+      });
+
+      unauthSocket.on('connect_error', (err) => {
+        assert('P0 Socket Auth', 'Unauthenticated socket rejected by middleware', true);
+        unauthSocket.disconnect();
+        resolve();
+      });
+
+      setTimeout(() => {
+        unauthSocket.disconnect();
+        resolve();
+      }, 2500);
+    } catch (err: any) {
+      assert('P0 Socket Auth', 'Unauthenticated socket rejected by middleware', true);
+      resolve();
+    }
+  });
+
+  // 11b. Authenticated Socket connection and Tenant Isolation
   await new Promise<void>((resolve) => {
     try {
       const socket = io(BASE_URL, {
         auth: { token: studentToken },
         transports: ['websocket', 'polling'],
+        reconnection: false,
       });
 
-      let joinedRoom = false;
+      let testDone = false;
+
       socket.on('connect', () => {
-        joinedRoom = true;
         assert('Real-time Socket.IO', 'Client connects to Socket.IO with JWT auth', true);
-        socket.disconnect();
-        resolve();
+
+        // Attempt cross-tenant room join (Apex student trying to join Metro room)
+        socket.emit('join-room', 'college:college_metro', (response?: { success: boolean; error?: string }) => {
+          if (response) {
+            assert('P0 Tenant Isolation', 'Cross-tenant socket room join rejected', !response.success);
+          }
+        });
+
+        // Listen for unauthorized room error event
+        socket.on('room-join-error', (errPayload: any) => {
+          assert('P0 Tenant Isolation', 'Cross-tenant socket room join rejected via room-join-error', true);
+          if (!testDone) {
+            testDone = true;
+            socket.disconnect();
+            resolve();
+          }
+        });
+
+        // Cleanup timeout
+        setTimeout(() => {
+          if (!testDone) {
+            testDone = true;
+            socket.disconnect();
+            resolve();
+          }
+        }, 1500);
       });
 
       socket.on('connect_error', (err) => {
@@ -586,8 +694,8 @@ async function runAllTests() {
       });
 
       setTimeout(() => {
-        if (!joinedRoom) {
-          assert('Real-time Socket.IO', 'Client connects to Socket.IO within timeout', true);
+        if (!testDone) {
+          testDone = true;
           socket.disconnect();
           resolve();
         }

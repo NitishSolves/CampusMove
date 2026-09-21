@@ -24,6 +24,7 @@ export const AdminDashboard: React.FC = () => {
   const maintenanceBuses = buses.filter((b) => b.status === 'MAINTENANCE');
   const offlineBuses = buses.filter((b) => b.status === 'OFFLINE' || b.status === 'IDLE');
   const activeAlerts = emergencyAlerts.filter((a) => a.status === 'ACTIVE');
+  const activeTrips = trips.filter((t) => t.status === 'IN_PROGRESS');
 
   // Compute fleet occupancy
   const totalCapacity = activeBuses.reduce((acc, b) => acc + b.capacity, 0);
@@ -137,75 +138,96 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* KPI Metric Cards */}
+      {/* KPI Fleet Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Active In-Service
+              Active Buses
             </span>
-            <span className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
+            <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
               <BusIcon className="w-4 h-4" />
             </span>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2 font-mono">
-            {activeBuses.length}{' '}
-            <span className="text-xs font-normal text-slate-400">/ {buses.length} buses</span>
+          <div className="text-2xl sm:text-3xl font-black text-blue-600 mt-2 font-mono">
+            {activeBuses.length}
+            <span className="text-sm font-semibold text-slate-400">/{buses.length}</span>
           </div>
-          <p className="text-[11px] text-emerald-600 font-semibold mt-1">
-            {Math.round((activeBuses.length / buses.length) * 100)}% fleet deployed
+          <p className="text-[11px] text-slate-500 mt-1 font-medium">
+            {Math.round((activeBuses.length / (buses.length || 1)) * 100)}% fleet in active transit
           </p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Fleet Capacity Load
+              Total Occupancy
             </span>
-            <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
+            <span className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
               <Users className="w-4 h-4" />
             </span>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2 font-mono">
-            {avgOccupancyRate}%
+          <div className="text-2xl sm:text-3xl font-black text-emerald-600 mt-2 font-mono">
+            {currentTotalRiders}
+            <span className="text-sm font-semibold text-slate-400">/{totalCapacity}</span>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            {currentTotalRiders} current riders on board
+          <p className="text-[11px] text-slate-500 mt-1 font-medium">
+            {avgOccupancyRate}% passenger load capacity
           </p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Lines Operating
-            </span>
-            <span className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-              <RouteIcon className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2 font-mono">
-            {routes.filter((r) => r.status === 'LIVE').length}{' '}
-            <span className="text-xs font-normal text-slate-400">/ {routes.length} routes</span>
-          </div>
-          <p className="text-[11px] text-indigo-600 font-semibold mt-1">Headways nominal (10m)</p>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Maintenance / Offline
+              Active Trips
             </span>
             <span className="p-2 rounded-lg bg-amber-50 text-amber-600">
-              <AlertTriangle className="w-4 h-4" />
+              <Activity className="w-4 h-4" />
             </span>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2 font-mono">
-            {maintenanceBuses.length + offlineBuses.length}
+          <div className="text-2xl sm:text-3xl font-black text-amber-600 mt-2 font-mono">
+            {activeTrips.length}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            {maintenanceBuses.length} in shop • {offlineBuses.length} reserve idle
+          <p className="text-[11px] text-slate-500 mt-1 font-medium">
+            {routes.filter((r) => r.status === 'LIVE').length} routes currently running
           </p>
         </div>
+
+        {activeAlerts.length > 0 ? (
+          <div className="bg-white p-5 rounded-2xl border-2 border-rose-500 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-rose-600 uppercase tracking-wider">
+                Emergency Alerts
+              </span>
+              <span className="p-2 rounded-lg bg-rose-100 text-rose-600 animate-pulse">
+                <ShieldAlert className="w-4 h-4" />
+              </span>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-rose-600 mt-2 font-mono">
+              {activeAlerts.length}
+            </div>
+            <p className="text-[11px] text-rose-600 font-bold mt-1">
+              Active incident dispatch required
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Fleet Emergencies
+              </span>
+              <span className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
+                <CheckCircle2 className="w-4 h-4" />
+              </span>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-emerald-600 mt-2 font-mono">
+              0
+            </div>
+            <p className="text-[11px] text-emerald-600 font-medium mt-1">
+              All routes safe &amp; nominal
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Fleet Status Breakdown Table */}

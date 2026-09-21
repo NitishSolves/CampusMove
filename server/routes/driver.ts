@@ -3,8 +3,71 @@ import { db, LocationRecord, EmergencyAlertRecord } from '../db';
 import { requireAuth, requireRole, AuthenticatedRequest } from '../middleware/auth';
 import { broadcastBusLocation, broadcastBusUpdate, broadcastEmergencyAlert } from '../socket';
 import { determineConfidence, calculateRouteETAs } from '../utils/eta';
+import { validateTelemetry } from '../utils/validation';
 
 const router = Router();
+
+// GET /api/driver/assignments (Driver's current active trip or vehicle assignment)
+router.get('/assignments', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user!;
+
+    // Check if driver has an active trip in progress
+    const activeTrip = await db.getActiveTripForDriver(user.userId, user.collegeId);
+    if (activeTrip) {
+      const bus = await db.getBusById(activeTrip.bus_id, user.collegeId);
+      const route = await db.getRouteById(activeTrip.route_id, user.collegeId);
+      const stops = await db.getStops(user.collegeId, activeTrip.route_id);
+
+      res.json({
+        assignment: {
+          tripId: activeTrip.id,
+          busId: bus?.id,
+          busNumber: bus?.bus_number,
+          busCapacity: bus?.capacity,
+          routeId: route?.id,
+          routeName: route?.name,
+          routeCode: route?.code,
+          stops,
+          status: activeTrip.status,
+          startTime: activeTrip.start_time,
+          currentOccupancy: activeTrip.current_occupancy,
+        },
+      });
+      return;
+    }
+
+    // Check if a bus is assigned to this driver in the fleet
+    const collegeBuses = await db.getBuses(user.collegeId);
+    const assignedBus = collegeBuses.find((b) => b.current_driver_id === user.userId);
+    if (assignedBus) {
+      const route = assignedBus.current_route_id ? await db.getRouteById(assignedBus.current_route_id, user.collegeId) : null;
+      const stops = assignedBus.current_route_id ? await db.getStops(user.collegeId, assignedBus.current_route_id) : [];
+
+      res.json({
+        assignment: {
+          tripId: null,
+          busId: assignedBus.id,
+          busNumber: assignedBus.bus_number,
+          busCapacity: assignedBus.capacity,
+          routeId: route?.id || null,
+          routeName: route?.name || null,
+          routeCode: route?.code || null,
+          stops,
+          status: 'IDLE',
+          startTime: null,
+          currentOccupancy: assignedBus.current_occupancy || 0,
+        },
+      });
+      return;
+    }
+
+    res.json({ assignment: null });
+  } catch (err: any) {
+    console.error('Error fetching driver assignments:', err);
+    res.status(500).json({ error: 'Failed to fetch assignments.' });
+  }
+});
 
 // POST /api/driver/location (Single real-time breadcrumb from browser GPS)
 router.post('/location', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -12,13 +75,28 @@ router.post('/location', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (r
     const user = req.user!;
     const { tripId, busId, lat, lng, speed, heading, accuracy, timestamp, isSimulated, id } = req.body;
 
-    if (lat === undefined || lng === undefined) {
-      res.status(400).json({ error: 'lat and lng are required.' });
+    if (!busId || typeof busId !== 'string') {
+      res.status(400).json({ error: 'busId is required and must be a valid string.' });
       return;
     }
 
+    // Verify bus exists in caller's college fleet
+    const bus = await db.getBusById(busId, user.collegeId);
+    if (!bus) {
+      res.status(404).json({ error: 'Bus not found in your college fleet.' });
+      return;
+    }
+
+    // Validate GPS telemetry and coordinates
+    const telemetryValidation = validateTelemetry({ lat, lng, speed, heading, accuracy });
+    if (!telemetryValidation.valid || !telemetryValidation.data) {
+      res.status(400).json({ error: telemetryValidation.error });
+      return;
+    }
+
+    const validData = telemetryValidation.data;
     const recordedAt = timestamp || new Date().toISOString();
-    const speedKmh = speed ? Math.round(speed * 3.6) : (speed === 0 ? 0 : 22);
+    const speedKmh = validData.speed !== undefined ? Math.round(validData.speed * 3.6) : 22;
 
     // 1. Persist breadcrumb in locations log
     const locRecord: LocationRecord = {
@@ -26,11 +104,11 @@ router.post('/location', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (r
       trip_id: tripId || 'no_trip',
       bus_id: busId,
       college_id: user.collegeId,
-      lat: Number(lat),
-      lng: Number(lng),
-      speed: speed !== undefined ? Number(speed) : undefined,
-      heading: heading !== undefined ? Number(heading) : undefined,
-      accuracy: accuracy !== undefined ? Number(accuracy) : undefined,
+      lat: validData.lat,
+      lng: validData.lng,
+      speed: validData.speed,
+      heading: validData.heading,
+      accuracy: validData.accuracy,
       recorded_at: recordedAt,
       is_offline_queued: false,
       created_at: new Date().toISOString(),
@@ -41,10 +119,10 @@ router.post('/location', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (r
     // 2. Update Bus vehicle state
     const confidence = determineConfidence(recordedAt, 'ACTIVE', Boolean(isSimulated));
     const updatedBus = await db.updateBus(busId, user.collegeId, {
-      last_location_lat: Number(lat),
-      last_location_lng: Number(lng),
+      last_location_lat: validData.lat,
+      last_location_lng: validData.lng,
       speed_kmh: speedKmh,
-      heading: heading !== undefined ? Number(heading) : 0,
+      heading: validData.heading !== undefined ? validData.heading : 0,
       gps_status: 'GPS_ACTIVE',
       network_status: 'NETWORK_ONLINE',
       eta_confidence: confidence,
@@ -56,8 +134,8 @@ router.post('/location', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (r
     if (updatedBus) {
       const stops = await db.getStops(user.collegeId, updatedBus.current_route_id);
       const upcomingEtas = calculateRouteETAs(
-        Number(lat),
-        Number(lng),
+        validData.lat,
+        validData.lng,
         speedKmh,
         stops,
         confidence
@@ -66,11 +144,11 @@ router.post('/location', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (r
       const payload = {
         busId,
         tripId,
-        lat: Number(lat),
-        lng: Number(lng),
+        lat: validData.lat,
+        lng: validData.lng,
         speedKmh,
-        heading: heading || 0,
-        accuracy: accuracy || 10,
+        heading: validData.heading || 0,
+        accuracy: validData.accuracy || 10,
         timestamp: recordedAt,
         gpsStatus: 'GPS_ACTIVE',
         networkStatus: 'NETWORK_ONLINE',
@@ -116,41 +194,92 @@ router.post('/location/sync', requireAuth, requireRole(['DRIVER', 'ADMIN']), asy
       return;
     }
 
+    const targetBusId = busId || locations[0]?.busId;
+    if (!targetBusId || typeof targetBusId !== 'string') {
+      res.status(400).json({ error: 'Valid busId is required for location sync.' });
+      return;
+    }
+
+    // Verify bus exists in caller's college fleet
+    const bus = await db.getBusById(targetBusId, user.collegeId);
+    if (!bus) {
+      res.status(404).json({ error: 'Bus not found in your college fleet.' });
+      return;
+    }
+
+    // Validate coordinates on every single queued location point
+    const validatedRecords: LocationRecord[] = [];
+    for (let i = 0; i < locations.length; i++) {
+      const item = locations[i];
+      const validation = validateTelemetry({
+        lat: item.lat,
+        lng: item.lng,
+        speed: item.speed,
+        heading: item.heading,
+        accuracy: item.accuracy,
+      });
+
+      if (!validation.valid || !validation.data) {
+        res.status(400).json({
+          error: `Invalid coordinates at index ${i}: ${validation.error}`,
+          failedIndex: i,
+        });
+        return;
+      }
+
+      validatedRecords.push({
+        id: item.id || `sync_${Date.now()}_${i}`,
+        trip_id: tripId || item.tripId || 'no_trip',
+        bus_id: targetBusId,
+        college_id: user.collegeId,
+        lat: validation.data.lat,
+        lng: validation.data.lng,
+        speed: validation.data.speed,
+        heading: validation.data.heading,
+        accuracy: validation.data.accuracy,
+        recorded_at: item.timestamp || new Date().toISOString(),
+        is_offline_queued: true,
+        created_at: new Date().toISOString(),
+      });
+    }
+
     // Sort chronologically
-    const sorted = [...locations].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    validatedRecords.sort(
+      (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
     );
 
-    const recordsToInsert: LocationRecord[] = sorted.map((item, idx) => ({
-      id: item.id || `sync_${Date.now()}_${idx}`,
-      trip_id: tripId || item.tripId || 'no_trip',
-      bus_id: busId || item.busId,
-      college_id: user.collegeId,
-      lat: Number(item.lat),
-      lng: Number(item.lng),
-      speed: item.speed !== undefined ? Number(item.speed) : undefined,
-      heading: item.heading !== undefined ? Number(item.heading) : undefined,
-      accuracy: item.accuracy !== undefined ? Number(item.accuracy) : undefined,
-      recorded_at: item.timestamp,
-      is_offline_queued: true,
-      created_at: new Date().toISOString(),
-    }));
+    let savedCount = 0;
+    const failedIndices: number[] = [];
+    const savedIds: string[] = [];
 
-    const savedCount = await db.saveLocationBatch(recordsToInsert);
+    for (let i = 0; i < validatedRecords.length; i++) {
+      try {
+        const saved = await db.saveLocation(validatedRecords[i]);
+        if (saved) {
+          savedCount++;
+          savedIds.push(validatedRecords[i].id);
+        } else {
+          failedIndices.push(i);
+        }
+      } catch (err) {
+        console.warn(`Failed to save location at index ${i}:`, err);
+        failedIndices.push(i);
+      }
+    }
 
-    // Update bus state with latest point
-    const latest = sorted[sorted.length - 1];
-    const latestSpeedKmh = latest.speed ? Math.round(latest.speed * 3.6) : 22;
-    const confidence = determineConfidence(latest.timestamp, 'ACTIVE', false);
+    // Update bus state with latest successfully saved point
+    const successfullySavedRecords = validatedRecords.filter((r) => savedIds.includes(r.id));
+    const latest = successfullySavedRecords.length > 0 ? successfullySavedRecords[successfullySavedRecords.length - 1] : validatedRecords[validatedRecords.length - 1];
+    const latestSpeedKmh = latest.speed !== undefined ? Math.round(latest.speed * 3.6) : 22;
+    const confidence = determineConfidence(latest.recorded_at, 'ACTIVE', false);
 
-    const targetBusId = busId || latest.busId;
     let updatedBus = null;
-    if (targetBusId) {
+    if (targetBusId && successfullySavedRecords.length > 0) {
       updatedBus = await db.updateBus(targetBusId, user.collegeId, {
-        last_location_lat: Number(latest.lat),
-        last_location_lng: Number(latest.lng),
+        last_location_lat: latest.lat,
+        last_location_lng: latest.lng,
         speed_kmh: latestSpeedKmh,
-        heading: latest.heading !== undefined ? Number(latest.heading) : 0,
+        heading: latest.heading !== undefined ? latest.heading : 0,
         gps_status: 'GPS_ACTIVE',
         network_status: 'NETWORK_ONLINE',
         eta_confidence: confidence,
@@ -158,7 +287,7 @@ router.post('/location/sync', requireAuth, requireRole(['DRIVER', 'ADMIN']), asy
       });
     }
 
-    if (tripId) {
+    if (tripId && savedCount > 0) {
       const trip = (await db.getTrips(user.collegeId, user.userId)).find((t) => t.id === tripId);
       if (trip) {
         await db.updateTrip(trip.id, user.collegeId, {
@@ -188,6 +317,8 @@ router.post('/location/sync', requireAuth, requireRole(['DRIVER', 'ADMIN']), asy
       success: true,
       savedCount,
       syncedPointsCount: savedCount,
+      savedIds,
+      failedIndices,
       latestLocation: {
         lat: latest.lat,
         lng: latest.lng,

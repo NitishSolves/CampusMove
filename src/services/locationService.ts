@@ -243,6 +243,7 @@ class LocationService {
     const queuedItems = await offlineQueueService.getAll(100);
     if (queuedItems.length === 0) {
       this.state.queuedCount = 0;
+      this.state.errorMessage = null;
       return;
     }
 
@@ -261,20 +262,47 @@ class LocationService {
       const busId = this.currentBusId || queuedItems[0].busId;
       const tripId = this.currentTripId || queuedItems[0].tripId;
 
-      await apiClient.post('/api/driver/location/sync', {
+      const syncRes = await apiClient.post<any>('/api/driver/location/sync', {
         tripId,
         busId,
         locations: queuedItems,
       });
 
-      // Clear successfully synced batch from IndexedDB
-      await offlineQueueService.remove(queuedItems.map((q) => q.id));
+      // Clear only successfully synced batch from IndexedDB
+      if (syncRes && Array.isArray(syncRes.savedIds) && syncRes.savedIds.length > 0) {
+        await offlineQueueService.remove(syncRes.savedIds);
+      } else if (syncRes && (!syncRes.failedIndices || syncRes.failedIndices.length === 0)) {
+        await offlineQueueService.remove(queuedItems.map((q) => q.id));
+      }
       this.state.queuedCount = await offlineQueueService.getCount();
       this.state.networkStatus = 'NETWORK_ONLINE';
       this.state.lastSyncTime = new Date().toISOString();
-    } catch (err) {
+      this.state.errorMessage = null;
+    } catch (err: any) {
       console.warn('Sync queued locations error:', err);
       this.state.networkStatus = 'LOCATION_QUEUED';
+      this.state.errorMessage = `Telemetry sync warning: ${err.message || 'Transmission failed, retrying shortly.'}`;
+
+      // Handle server validation error (e.g., corrupt location data)
+      if (err.status === 400 && typeof err.data?.failedIndex === 'number') {
+        const badItem = queuedItems[err.data.failedIndex];
+        if (badItem) {
+          console.warn('Pruning unrecoverable location record from queue:', badItem.id);
+          await offlineQueueService.remove([badItem.id]);
+        }
+      } else {
+        // Increment attempts on the batch; auto-prunes dead-letter points after threshold
+        await offlineQueueService.incrementAttempts(queuedItems.map((q) => q.id));
+      }
+
+      this.state.queuedCount = await offlineQueueService.getCount();
+
+      // Schedule retry with exponential backoff if online
+      if (navigator.onLine && !this.state.isSimulatedOffline) {
+        window.setTimeout(() => {
+          this.attemptSyncQueuedLocations();
+        }, 5000);
+      }
     } finally {
       this.isSyncing = false;
       this.notify();

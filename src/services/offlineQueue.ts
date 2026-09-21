@@ -172,6 +172,50 @@ class OfflineQueueService {
       this.memoryFallback = [];
     }
   }
+
+  public async incrementAttempts(ids: string[], maxAttempts = 15): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const prunedIds: string[] = [];
+    try {
+      const db = await this.initIndexedDb();
+      return new Promise<string[]>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        for (const id of ids) {
+          const getReq = store.get(id);
+          getReq.onsuccess = () => {
+            const item: QueuedLocationUpdate = getReq.result;
+            if (item) {
+              const count = (item.attemptCount || 0) + 1;
+              if (count > maxAttempts) {
+                store.delete(id);
+                prunedIds.push(id);
+              } else {
+                item.attemptCount = count;
+                store.put(item);
+              }
+            }
+          };
+        }
+        tx.oncomplete = () => resolve(prunedIds);
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {
+      const idSet = new Set(ids);
+      this.memoryFallback = this.memoryFallback.filter((item) => {
+        if (idSet.has(item.id)) {
+          const count = (item.attemptCount || 0) + 1;
+          if (count > maxAttempts) {
+            prunedIds.push(item.id);
+            return false;
+          }
+          item.attemptCount = count;
+        }
+        return true;
+      });
+      return prunedIds;
+    }
+  }
 }
 
 export const offlineQueueService = new OfflineQueueService();

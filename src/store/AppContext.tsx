@@ -10,6 +10,7 @@ import {
   EmergencyAlert,
 } from '../types';
 import { authService } from '../services/authService';
+import { apiClient } from '../services/apiClient';
 import { realtimeService } from '../services/realtimeService';
 import { routeService } from '../services/routeService';
 import { tripService } from '../services/tripService';
@@ -93,6 +94,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubAlerts();
     };
   }, []);
+
+  // Trip Recovery After Disconnect (Task 2.3)
+  useEffect(() => {
+    const recoverActiveTrip = async () => {
+      try {
+        const response = await apiClient.get<{ activeTrip: Trip | null }>('/api/trips/active');
+        if (response && response.activeTrip) {
+          setActiveTrip(response.activeTrip);
+          if (response.activeTrip.status === 'IN_PROGRESS') {
+            locationService.startTracking(
+              response.activeTrip.id,
+              response.activeTrip.busId,
+              currentUser?.id || ''
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to recover active trip on connect:', err);
+      }
+    };
+
+    if (currentUser?.role === 'DRIVER') {
+      recoverActiveTrip();
+    }
+  }, [currentUser]);
+
+  // Persistent storage for active trip
+  useEffect(() => {
+    if (activeTrip) {
+      localStorage.setItem('smart_campus_bus_active_trip', JSON.stringify(activeTrip));
+    } else {
+      localStorage.removeItem('smart_campus_bus_active_trip');
+    }
+  }, [activeTrip]);
 
   const role: UserRole = currentUser?.role || 'STUDENT';
 

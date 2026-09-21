@@ -23,6 +23,24 @@ export const StudentLiveBuses: React.FC = () => {
 
   const activeBuses = buses.filter((b) => b.status === 'ACTIVE');
 
+  const getTimeSinceUpdate = (timestamp: string): { text: string; diffMinutes: number } => {
+    if (!timestamp) return { text: 'Just now', diffMinutes: 0 };
+    const now = new Date().getTime();
+    const then = new Date(timestamp).getTime();
+    const diffMs = Math.max(0, now - then);
+    const diffMin = Math.floor(diffMs / 60000);
+
+    let text = 'Just now';
+    if (diffMin === 1) text = '1 minute ago';
+    else if (diffMin > 1 && diffMin < 60) text = `${diffMin} minutes ago`;
+    else if (diffMin >= 60) {
+      const diffHours = Math.floor(diffMin / 60);
+      text = `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    }
+
+    return { text, diffMinutes: diffMin };
+  };
+
   // Filter routes
   const filteredBuses = activeBuses.filter((b) => {
     if (selectedRouteId === 'ALL') return true;
@@ -180,6 +198,36 @@ export const StudentLiveBuses: React.FC = () => {
                   capacity={selectedBus.capacity}
                 />
               </div>
+
+              {/* Freshness & Timestamp Badge (Task 3.4) */}
+              {(() => {
+                const updateInfo = getTimeSinceUpdate(selectedBus.lastSyncTimestamp);
+                return (
+                  <div
+                    className={`p-3 rounded-xl border text-xs transition-colors ${
+                      updateInfo.diffMinutes < 2
+                        ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+                        : updateInfo.diffMinutes < 5
+                        ? 'border-amber-200 bg-amber-50/70 text-amber-900'
+                        : 'border-slate-300 bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-[11px] uppercase tracking-wider">
+                        Telemetry Freshness:
+                      </span>
+                      <span className="font-bold font-mono">
+                        {updateInfo.text}
+                      </span>
+                    </div>
+                    {updateInfo.diffMinutes >= 2 && (
+                      <p className="text-[11px] text-amber-700 font-semibold mt-1 flex items-center gap-1">
+                        ⚠️ Data may be delayed or stale
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Telemetry & GPS Info */}
               <div className="text-xs space-y-2 pt-2 border-t border-slate-100 text-slate-600">

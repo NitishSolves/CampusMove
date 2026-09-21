@@ -769,12 +769,8 @@ export async function initDatabase(): Promise<{ isPostgres: boolean }> {
         console.warn('PostgreSQL schema.sql could not be located in candidate paths:', possibleSchemaPaths);
       }
 
-      // Check if seeded
-      const checkRes = await client.query('SELECT COUNT(*) as cnt FROM colleges');
-      if (parseInt(checkRes.rows[0].cnt, 10) === 0) {
-        console.log('Seeding initial data into PostgreSQL...');
-        await seedPostgresData(client);
-      }
+      // Seed initial data into PostgreSQL (idempotent ON CONFLICT DO NOTHING)
+      await seedPostgresData(client);
 
       client.release();
       return { isPostgres: true };
@@ -1202,6 +1198,21 @@ export const db = {
     );
   },
 
+  async getActiveTripForBus(busId: string, collegeId: string): Promise<TripRecord | null> {
+    if (pool) {
+      const res = await pool.query(
+        'SELECT * FROM trips WHERE bus_id = $1 AND college_id = $2 AND status IN (\'STARTED\', \'IN_PROGRESS\') ORDER BY start_time DESC LIMIT 1',
+        [busId, collegeId]
+      );
+      return res.rows[0] || null;
+    }
+    return (
+      memoryData.trips.find(
+        (t) => t.bus_id === busId && t.college_id === collegeId && (t.status === 'STARTED' || t.status === 'IN_PROGRESS')
+      ) || null
+    );
+  },
+
   async getTrips(collegeId: string, driverId?: string): Promise<TripRecord[]> {
     if (pool) {
       let query = 'SELECT * FROM trips WHERE college_id = $1';
@@ -1262,11 +1273,19 @@ export const db = {
   // Locations / GPS Breadcrumbs
   async saveLocation(loc: LocationRecord): Promise<boolean> {
     if (pool) {
+      let validTripId: string | null = null;
+      if (loc.trip_id && loc.trip_id !== 'no_trip') {
+        const tripCheck = await pool.query('SELECT 1 FROM trips WHERE id = $1', [loc.trip_id]);
+        if ((tripCheck.rowCount ?? 0) > 0) {
+          validTripId = loc.trip_id;
+        }
+      }
+
       const res = await pool.query(
         `INSERT INTO locations (id, trip_id, bus_id, college_id, lat, lng, speed, heading, accuracy, recorded_at, is_offline_queued)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (id) DO NOTHING`,
-        [loc.id, loc.trip_id, loc.bus_id, loc.college_id, loc.lat, loc.lng, loc.speed || null, loc.heading || null, loc.accuracy || null, loc.recorded_at, loc.is_offline_queued]
+        [loc.id, validTripId, loc.bus_id, loc.college_id, loc.lat, loc.lng, loc.speed || null, loc.heading || null, loc.accuracy || null, loc.recorded_at, loc.is_offline_queued]
       );
       return (res.rowCount ?? 0) > 0;
     } else {
@@ -1324,10 +1343,26 @@ export const db = {
 
   async createEmergencyAlert(alert: EmergencyAlertRecord): Promise<EmergencyAlertRecord> {
     if (pool) {
+      let validTripId: string | null = null;
+      if (alert.trip_id && alert.trip_id !== 'no_trip') {
+        const tripCheck = await pool.query('SELECT 1 FROM trips WHERE id = $1', [alert.trip_id]);
+        if ((tripCheck.rowCount ?? 0) > 0) {
+          validTripId = alert.trip_id;
+        }
+      }
+
+      let validBusId: string | null = null;
+      if (alert.bus_id) {
+        const busCheck = await pool.query('SELECT 1 FROM buses WHERE id = $1', [alert.bus_id]);
+        if ((busCheck.rowCount ?? 0) > 0) {
+          validBusId = alert.bus_id;
+        }
+      }
+
       await pool.query(
         `INSERT INTO emergency_alerts (id, college_id, trip_id, bus_id, driver_id, bus_number, route_name, driver_name, reason, location_lat, location_lng, timestamp, status)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [alert.id, alert.college_id, alert.trip_id || null, alert.bus_id || null, alert.driver_id || null, alert.bus_number, alert.route_name, alert.driver_name, alert.reason, alert.location_lat, alert.location_lng, alert.timestamp, alert.status]
+        [alert.id, alert.college_id, validTripId, validBusId, alert.driver_id || null, alert.bus_number, alert.route_name, alert.driver_name, alert.reason, alert.location_lat, alert.location_lng, alert.timestamp, alert.status]
       );
     } else {
       memoryData.emergency_alerts.unshift(alert);

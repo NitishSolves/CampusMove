@@ -23,7 +23,7 @@ class AuthService {
       this.validateSession();
     } else {
       // Default demo user on fresh visit
-      this.login('alex.chen@apex.edu', 'STUDENT').catch(() => {
+      this.login('alex.chen@apex.edu', 'ApexBus2025!').catch(() => {
         // Fallback default
       });
     }
@@ -43,12 +43,12 @@ class AuthService {
 
   public async login(
     email: string,
-    role?: UserRole
+    password = 'ApexBus2025!'
   ): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
       const res = await apiClient.post<{ token: string; user: User }>('/api/auth/login', {
         email,
-        role,
+        password,
       });
 
       setStoredToken(res.token);
@@ -66,30 +66,54 @@ class AuthService {
     }
   }
 
-  public async switchRole(role: UserRole): Promise<User | null> {
+  public async register(data: {
+    email: string;
+    password: string;
+    name: string;
+    role: UserRole;
+    collegeId: string;
+    studentId?: string;
+    cdlNumber?: string;
+    phone?: string;
+  }): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
-      const res = await apiClient.post<{ token: string; user: User }>('/api/auth/switch-role', {
-        role,
-        collegeId: this.currentUser?.collegeId || 'college_apex',
-      });
+      const res = await apiClient.post<{ token: string; user: User }>('/api/auth/register', data);
 
       setStoredToken(res.token);
       this.currentUser = res.user;
       this.saveSession();
       this.notifyListeners();
 
+      // Connect socket
       socketService.connect(res.user.collegeId);
-      return res.user;
+
+      return { success: true, user: res.user };
     } catch (err: any) {
-      console.error('Role switch failed:', err);
-      return this.currentUser;
+      console.warn('API Register error:', err.message);
+      return { success: false, error: err.message || 'Registration failed.' };
     }
+  }
+
+  public async switchRole(role: UserRole): Promise<User | null> {
+    const roleCreds: Record<UserRole, { email: string; pass: string }> = {
+      STUDENT: { email: 'alex.chen@apex.edu', pass: 'ApexBus2025!' },
+      DRIVER: { email: 'marcus.vance@transit.apex.edu', pass: 'ApexBus2025!' },
+      ADMIN: { email: 'admin@apex.edu', pass: 'ApexBus2025!' },
+    };
+
+    const creds = roleCreds[role];
+    if (creds) {
+      const res = await this.login(creds.email, creds.pass);
+      return res.user || null;
+    }
+    return null;
   }
 
   public logout(): void {
     setStoredToken(null);
     this.currentUser = null;
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    socketService.disconnect();
     this.notifyListeners();
   }
 

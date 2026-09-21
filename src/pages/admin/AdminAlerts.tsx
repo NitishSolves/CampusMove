@@ -217,14 +217,16 @@ export const AdminAlerts: React.FC = () => {
                   Coordinates: [{alert.location.lat.toFixed(4)}, {alert.location.lng.toFixed(4)}]
                 </div>
 
-                {alert.status === 'ACTIVE' && (
+                {alert.status !== 'RESOLVED' && (
                   <div className="flex items-center gap-2 pt-2 border-t border-rose-200">
-                    <button
-                      onClick={() => handleAcknowledge(alert.id)}
-                      className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-lg cursor-pointer text-xs transition-colors"
-                    >
-                      Acknowledge
-                    </button>
+                    {alert.status === 'ACTIVE' && (
+                      <button
+                        onClick={() => handleAcknowledge(alert.id)}
+                        className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-lg cursor-pointer text-xs transition-colors"
+                      >
+                        Acknowledge
+                      </button>
+                    )}
                     <button
                       onClick={() => handleResolve(alert.id)}
                       className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg cursor-pointer text-xs transition-colors shadow-2xs"

@@ -16,21 +16,40 @@ export function initSocketIO(server: HttpServer, corsOrigin: string | string[] |
     pingInterval: 10000,
   });
 
-  io.on('connection', (socket: Socket) => {
-    // Optional auth token from handshake query or headers
-    const token = (socket.handshake.auth?.token || socket.handshake.query?.token) as string;
-    let collegeId = (socket.handshake.auth?.collegeId || socket.handshake.query?.collegeId) as string;
-    let userRole = 'GUEST';
+  // Socket.IO authentication middleware
+  io.use((socket: Socket, next: (err?: Error) => void) => {
+    const rawToken =
+      socket.handshake.auth?.token ||
+      socket.handshake.query?.token ||
+      socket.handshake.headers?.authorization;
 
-    if (token) {
-      const decoded = verifyToken(token);
-      if (decoded) {
-        collegeId = decoded.collegeId;
-        userRole = decoded.role;
-      }
+    let token = typeof rawToken === 'string' ? rawToken : '';
+    if (token.startsWith('Bearer ')) {
+      token = token.slice(7).trim();
     }
 
-    // Default room subscription
+    if (!token) {
+      return next(new Error('Authentication error: Token required.'));
+    }
+
+    const decoded = verifyToken(token);
+    if (!decoded) {
+      return next(new Error('Authentication error: Invalid or expired token.'));
+    }
+
+    // Attach verified identity to socket data
+    socket.data.user = decoded;
+    socket.data.collegeId = decoded.collegeId;
+    socket.data.role = decoded.role;
+    next();
+  });
+
+  io.on('connection', (socket: Socket) => {
+    const user = socket.data.user;
+    const collegeId = socket.data.collegeId;
+    const userRole = socket.data.role;
+
+    // Join tenant room strictly for user's verified college
     if (collegeId) {
       socket.join(`college:${collegeId}`);
       if (userRole === 'ADMIN') {
@@ -38,17 +57,20 @@ export function initSocketIO(server: HttpServer, corsOrigin: string | string[] |
       }
     }
 
-    // Allow client to join explicit college channel (e.g. guest or student switching view)
+    // Enforce tenant isolation on explicit college join requests
     socket.on('join:college', (targetCollegeId: string) => {
-      if (targetCollegeId) {
-        // Leave any previous college rooms
-        Array.from(socket.rooms).forEach((r) => {
-          if (r.startsWith('college:')) socket.leave(r);
+      if (!targetCollegeId || targetCollegeId !== collegeId) {
+        socket.emit('error', {
+          code: 'FORBIDDEN_CROSS_TENANT',
+          message: 'Cross-college socket subscription is unauthorized.',
         });
-        socket.join(`college:${targetCollegeId}`);
-        if (userRole === 'ADMIN') {
-          socket.join(`college:${targetCollegeId}:admin`);
-        }
+        return;
+      }
+
+      // Re-verify room membership
+      socket.join(`college:${collegeId}`);
+      if (userRole === 'ADMIN') {
+        socket.join(`college:${collegeId}:admin`);
       }
     });
 

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { db, TripRecord } from '../db';
 import { requireAuth, requireRole, AuthenticatedRequest } from '../middleware/auth';
 import { broadcastTripStarted, broadcastTripEnded, broadcastOccupancyUpdate, broadcastBusUpdate } from '../socket';
+import { validateTripStart, validateOccupancyInput } from '../utils/validation';
 
 const router = Router();
 
@@ -77,12 +78,13 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response): P
 router.post('/start', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const { busId, routeId } = req.body;
-
-    if (!busId || !routeId) {
-      res.status(400).json({ error: 'busId and routeId are required to start a trip.' });
+    const validation = validateTripStart(req.body);
+    if (!validation.valid || !validation.data) {
+      res.status(400).json({ error: validation.error });
       return;
     }
+
+    const { busId, routeId } = validation.data;
 
     const bus = await db.getBusById(busId, user.collegeId);
     if (!bus) {
@@ -96,14 +98,31 @@ router.post('/start', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (req:
       return;
     }
 
-    // Check if driver already has an active trip
+    // Check if the requested bus is ALREADY in an active trip by another driver
+    const activeBusTrip = await db.getActiveTripForBus(busId, user.collegeId);
+    if ((activeBusTrip && activeBusTrip.driver_id !== user.userId) || (bus.current_driver_id && bus.current_driver_id !== user.userId)) {
+      res.status(409).json({
+        error: `Bus ${bus.bus_number} is already in use by another driver. Cannot start multiple trips on same bus.`,
+        activeTripId: activeBusTrip?.id,
+        currentDriver: bus.driver_name,
+      });
+      return;
+    }
+
+    // Check if THIS driver already has an active trip in progress
     const existing = await db.getActiveTripForDriver(user.userId, user.collegeId);
     if (existing) {
-      // Auto-complete previous trip
-      await db.updateTrip(existing.id, user.collegeId, {
-        status: 'COMPLETED',
-        end_time: new Date().toISOString(),
+      const existingRoute = await db.getRouteById(existing.route_id, user.collegeId);
+      res.status(409).json({
+        error: 'You already have an active trip in progress. End it before starting another.',
+        activeTrip: {
+          id: existing.id,
+          busNumber: bus.bus_number,
+          routeName: existingRoute?.name || 'Active Line',
+          startTime: existing.start_time,
+        },
       });
+      return;
     }
 
     const newTrip: TripRecord = {
@@ -212,7 +231,13 @@ router.post('/end', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (req: A
 router.post('/occupancy', requireAuth, requireRole(['DRIVER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const { delta, absoluteCount } = req.body;
+    const validation = validateOccupancyInput(req.body);
+    if (!validation.valid || !validation.data) {
+      res.status(400).json({ error: validation.error });
+      return;
+    }
+
+    const { delta, absoluteCount } = validation.data;
 
     const activeTrip = await db.getActiveTripForDriver(user.userId, user.collegeId);
     if (!activeTrip) {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../store/AppContext';
+import { apiClient } from '../../services/apiClient';
 import { tripService } from '../../services/tripService';
 import { adminService } from '../../services/adminService';
 import { GPSStatusBadge, NetworkStatusBadge } from '../../components/common/StatusBadges';
@@ -22,6 +23,7 @@ import {
   ShieldAlert,
   Smartphone,
   RefreshCw,
+  HelpCircle,
 } from 'lucide-react';
 
 export const DriverDashboard: React.FC = () => {
@@ -34,17 +36,54 @@ export const DriverDashboard: React.FC = () => {
     toggleSimulatedOffline,
   } = useApp();
 
-  // Find driver's assigned bus and route
-  const assignedBus = buses.find((b) => b.id === 'bus_104') || buses[0];
-  const assignedRoute = routes.find((r) => r.id === (activeTrip?.routeId || assignedBus?.currentRouteId)) || routes[0];
+  const [assignment, setAssignment] = useState<any>(null);
+  const [tripError, setTripError] = useState<string | null>(null);
+
+  // Fetch driver assignments from backend API
+  useEffect(() => {
+    let isMounted = true;
+    const loadAssignment = async () => {
+      try {
+        const res = await apiClient.get<any>('/api/driver/assignments');
+        if (isMounted && res?.assignment) {
+          setAssignment(res.assignment);
+        }
+      } catch (err) {
+        console.warn('Could not load driver assignment:', err);
+      }
+    };
+    loadAssignment();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTrip]);
+
+  // Determine driver's assigned bus and route dynamically
+  const assignedBus =
+    buses.find((b) => b.id === activeTrip?.busId) ||
+    (assignment?.busId ? buses.find((b) => b.id === assignment.busId) : null) ||
+    buses.find((b) => b.currentDriverId === currentUser?.id) ||
+    buses[0];
+
+  const assignedRoute =
+    routes.find((r) => r.id === (activeTrip?.routeId || assignment?.routeId || assignedBus?.currentRouteId)) ||
+    routes[0];
 
   const [useSimulatedGps, setUseSimulatedGps] = useState(false);
   const [showStartTripModal, setShowStartTripModal] = useState(false);
   const [showEndTripConfirm, setShowEndTripConfirm] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [showGpsHelpModal, setShowGpsHelpModal] = useState(false);
   const [emergencyReason, setEmergencyReason] = useState('Mechanical issue / curb stop');
   const [emergencySent, setEmergencySent] = useState(false);
   const [tripSummary, setTripSummary] = useState<any>(null);
+
+  // Auto-prompt GPS permission walkthrough if permission required
+  useEffect(() => {
+    if (locationState.gpsStatus === 'GPS_PERMISSION_REQUIRED') {
+      setShowGpsHelpModal(true);
+    }
+  }, [locationState.gpsStatus]);
 
   // Time elapsed in active trip
   const [tripElapsedMins, setTripElapsedMins] = useState(0);
@@ -66,13 +105,18 @@ export const DriverDashboard: React.FC = () => {
 
   const handleStartTrip = async () => {
     setShowStartTripModal(false);
-    await tripService.startTrip(
-      assignedBus.id,
-      currentUser?.id || 'driver_marcus',
-      assignedRoute.id,
-      currentUser?.collegeId || 'college_apex',
-      useSimulatedGps
-    );
+    setTripError(null);
+    try {
+      await tripService.startTrip(
+        assignedBus.id,
+        currentUser?.id || 'driver_marcus',
+        assignedRoute.id,
+        currentUser?.collegeId || 'college_apex',
+        useSimulatedGps
+      );
+    } catch (err: any) {
+      setTripError(err.message || err.data?.error || 'Vehicle or driver conflict: Cannot start trip while another is active.');
+    }
   };
 
   const handleEndTrip = async () => {
@@ -228,9 +272,19 @@ export const DriverDashboard: React.FC = () => {
 
             {/* GPS & Network Status Matrix */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                  GPS Telemetry Device
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    GPS Telemetry Device
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowGpsHelpModal(true)}
+                    className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span>GPS Help</span>
+                  </button>
                 </div>
                 <GPSStatusBadge
                   status={locationState.gpsStatus}
@@ -295,7 +349,7 @@ export const DriverDashboard: React.FC = () => {
             <button
               id="end-trip-button"
               onClick={() => setShowEndTripConfirm(true)}
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              className="w-full min-h-[52px] py-3.5 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold text-sm rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
             >
               <Square className="w-4 h-4 fill-current text-rose-400" />
               <span>END TRIP & RETURN TO TERMINAL</span>
@@ -338,13 +392,13 @@ export const DriverDashboard: React.FC = () => {
           />
         </div>
 
-        {/* Large Touch-friendly Quick Buttons */}
+        {/* Large Touch-friendly Quick Buttons (Task 3.2: Mobile Touch Targets) */}
         <div className="grid grid-cols-4 gap-2 pt-2">
           <button
             id="occupancy-minus-5"
             disabled={occupancy <= 0}
             onClick={() => handleOccupancyChange(-5)}
-            className="py-3 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 font-bold text-sm rounded-xl transition-colors cursor-pointer disabled:opacity-40"
+            className="h-14 sm:h-16 min-h-[56px] bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 font-black text-base rounded-2xl transition-all cursor-pointer disabled:opacity-40 shadow-xs flex items-center justify-center"
           >
             -5
           </button>
@@ -352,7 +406,7 @@ export const DriverDashboard: React.FC = () => {
             id="occupancy-minus-1"
             disabled={occupancy <= 0}
             onClick={() => handleOccupancyChange(-1)}
-            className="py-3 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 font-bold text-sm rounded-xl transition-colors cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+            className="h-14 sm:h-16 min-h-[56px] bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 font-black text-base rounded-2xl transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1 shadow-xs"
           >
             <Minus className="w-4 h-4" /> 1
           </button>
@@ -360,7 +414,7 @@ export const DriverDashboard: React.FC = () => {
             id="occupancy-plus-1"
             disabled={occupancy >= capacity}
             onClick={() => handleOccupancyChange(1)}
-            className="py-3 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-800 font-bold text-sm rounded-xl transition-colors cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+            className="h-14 sm:h-16 min-h-[56px] bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-800 font-black text-base rounded-2xl transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1 shadow-xs"
           >
             <Plus className="w-4 h-4" /> 1
           </button>
@@ -368,7 +422,7 @@ export const DriverDashboard: React.FC = () => {
             id="occupancy-plus-5"
             disabled={occupancy >= capacity}
             onClick={() => handleOccupancyChange(5)}
-            className="py-3 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-800 font-bold text-sm rounded-xl transition-colors cursor-pointer disabled:opacity-40"
+            className="h-14 sm:h-16 min-h-[56px] bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-800 font-black text-base rounded-2xl transition-all cursor-pointer disabled:opacity-40 shadow-xs flex items-center justify-center"
           >
             +5
           </button>
@@ -377,9 +431,9 @@ export const DriverDashboard: React.FC = () => {
 
       {/* Emergency Alert Section */}
       <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 shadow-2xs">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0">
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
@@ -393,7 +447,7 @@ export const DriverDashboard: React.FC = () => {
           <button
             id="driver-emergency-button"
             onClick={() => setShowEmergencyModal(true)}
-            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 shrink-0"
+            className="w-full sm:w-auto min-h-[50px] px-5 py-3 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-black text-xs sm:text-sm rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-2 shrink-0"
           >
             <AlertTriangle className="w-4 h-4" />
             <span>TRIGGER EMERGENCY</span>
@@ -542,6 +596,82 @@ export const DriverDashboard: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* Driver GPS Permission Walkthrough Modal (Task 3.1) */}
+      <Modal
+        isOpen={showGpsHelpModal}
+        onClose={() => setShowGpsHelpModal(false)}
+        title="Driver Device GPS Setup Guide"
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-600 leading-relaxed">
+            Live bus telemetry relies on your device&apos;s GPS sensor to calculate student ETAs and broadcast real-time transit positions.
+          </p>
+
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-2">
+            <div className="font-bold text-blue-900 flex items-center gap-1.5">
+              <Smartphone className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>Mobile Browser Setup</span>
+            </div>
+            <div className="space-y-2 text-slate-700">
+              <div>
+                <strong className="text-slate-900">Apple iOS (Safari):</strong>
+                <ol className="list-decimal pl-5 mt-0.5 space-y-0.5">
+                  <li>Open iOS <strong>Settings</strong> &gt; <strong>Privacy &amp; Security</strong> &gt; <strong>Location Services</strong></li>
+                  <li>Ensure <strong>Location Services</strong> is switched <strong>On</strong></li>
+                  <li>Scroll to <strong>Safari Websites</strong> &gt; choose <strong>While Using the App</strong> (with Precise Location enabled)</li>
+                </ol>
+              </div>
+              <div>
+                <strong className="text-slate-900">Android (Chrome):</strong>
+                <ol className="list-decimal pl-5 mt-0.5 space-y-0.5">
+                  <li>Tap the <strong>tune / lock icon</strong> left of the URL in the address bar</li>
+                  <li>Tap <strong>Permissions</strong> &gt; <strong>Location</strong> &gt; select <strong>Allow</strong></li>
+                  <li>Ensure Android device <strong>High Accuracy Location</strong> is toggled on</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+            <strong className="text-slate-800">Desktop / Laptop Chrome or Firefox:</strong>
+            <p className="text-slate-600">
+              Click the lock/settings icon next to the URL address bar and change <strong>Location</strong> from &ldquo;Ask&rdquo; or &ldquo;Block&rdquo; to <strong>Allow</strong>, then reload.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                if ('geolocation' in navigator) {
+                  navigator.geolocation.getCurrentPosition(
+                    () => {
+                      setShowGpsHelpModal(false);
+                    },
+                    (err) => {
+                      console.warn('Geolocation permission error:', err);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                  );
+                }
+              }}
+              className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <Radio className="w-4 h-4" />
+              <span>Prompt Device GPS Permission</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowGpsHelpModal(false)}
+              className="w-full sm:w-auto px-4 py-2 text-slate-600 hover:bg-slate-100 font-semibold rounded-xl cursor-pointer text-center"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

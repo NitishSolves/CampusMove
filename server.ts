@@ -48,10 +48,18 @@ async function startServer() {
     const originsList = rawCorsOrigin.split(',').map((o) => o.trim()).filter(Boolean);
     if (originsList.includes('*')) {
       if (isProduction) {
-        console.warn('⚠️ WARNING: Wildcard "*" CORS_ORIGIN configured in production mode. Set explicit origin for production.');
+        throw new Error('FATAL: Wildcard "*" CORS_ORIGIN is prohibited in production mode. Specify explicit domain origins (e.g. https://campusmove.vercel.app).');
       }
       allowedOrigins = true;
     } else {
+      if (isProduction) {
+        originsList.forEach((origin) => {
+          if (!origin.startsWith('https://') && !origin.startsWith('http://localhost') && origin !== 'localhost') {
+            throw new Error(`FATAL: CORS origin must be HTTPS in production: ${origin}`);
+          }
+        });
+        console.log(`✓ CORS configured for production origins: ${originsList.join(', ')}`);
+      }
       allowedOrigins = originsList;
     }
   }
@@ -69,15 +77,48 @@ async function startServer() {
   app.use(express.json({ limit: '5mb' }));
   app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
-  // Security Rate Limiter for API endpoints
+  // Endpoint-specific security rate limiters (Task 2.6)
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15-minute window
+    max: 30, // 30 attempts per 15 min per IP to prevent brute-force attacks
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    message: { error: 'Too many authentication attempts. Please try again later.' },
+  });
+
+  const gpsLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 300, // 300 req/min = 5 req/sec (plenty for phone GPS + batch sync while preventing DoS)
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    message: { error: 'Too many GPS telemetry reports. Throttling.' },
+  });
+
+  const emergencyLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 15, // 15 req/min per client (protects dispatcher from alert flooding)
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    message: { error: 'Too many emergency requests. Please contact campus security directly.' },
+  });
+
   const apiLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
-    max: 600, // generous 600 requests/minute for high-frequency GPS telemetry
+    windowMs: 60 * 1000,
+    max: 120, // 120 req/min for general API traffic
     standardHeaders: true,
     legacyHeaders: false,
     validate: false,
     message: { error: 'Too many requests from this client. Please retry in a moment.' },
   });
+
+  // Mount specific limiters before general /api/ limiter
+  app.use('/api/auth/login', authLimiter);
+  app.use('/api/auth/register', authLimiter);
+  app.use('/api/driver/location', gpsLimiter);
+  app.use('/api/driver/emergency', emergencyLimiter);
   app.use('/api/', apiLimiter);
 
   // Initialize Socket.IO Real-Time Engine with matched allowed origins

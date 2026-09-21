@@ -5,10 +5,19 @@ export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('FATAL: JWT_SECRET environment variable is missing. It must be explicitly configured in production.');
+      throw new Error(
+        'FATAL: JWT_SECRET environment variable is missing and strictly required in production. ' +
+        'Set it to a 64+ character random string. ' +
+        'Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+      );
     }
-    return 'dev_insecure_local_only_secret_do_not_use_in_production';
+    return 'campusmove_dev_secret_key_minimum_32_characters_long_for_security_compliance';
   }
+
+  if (secret.length < 32) {
+    throw new Error('FATAL: JWT_SECRET must be at least 32 characters long for production security');
+  }
+
   return secret;
 }
 
