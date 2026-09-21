@@ -17,7 +17,16 @@ import { tripService } from '../services/tripService';
 import { locationService, LocationServiceState } from '../services/locationService';
 import { notificationService } from '../services/notificationService';
 import { adminService } from '../services/adminService';
-import { mockColleges, defaultCollege } from '../mock/colleges';
+
+const DEFAULT_COLLEGE: College = {
+  id: 'college_apex',
+  name: 'Apex State University',
+  shortCode: 'ASU',
+  campusName: 'Main Campus',
+  centerLocation: { lat: 34.0537, lng: -118.2570 },
+  defaultZoom: 15,
+  timezone: 'America/Los_Angeles',
+};
 
 interface AppContextType {
   currentUser: User | null;
@@ -25,9 +34,8 @@ interface AppContextType {
   currentCollege: College;
   colleges: College[];
   switchCollege: (collegeId: string) => void;
-  switchRole: (role: UserRole) => void;
   logout: () => void;
-  loginAs: (role: UserRole) => Promise<void>;
+  isAuthenticated: boolean;
 
   // Data
   buses: Bus[];
@@ -39,40 +47,59 @@ interface AppContextType {
   emergencyAlerts: EmergencyAlert[];
   activeEmergencyCount: number;
 
+  // Loading states
+  isLoadingData: boolean;
+  dataError: string | null;
+
   // Location / GPS / Network
   locationState: LocationServiceState;
-  toggleSimulatedOffline: (simulate: boolean) => void;
 
   // Refresh & Reset
   refreshData: () => Promise<void>;
-  resetAllData: () => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(authService.getCurrentUser());
-  const [currentCollege, setCurrentCollege] = useState<College>(defaultCollege);
-  const [buses, setBuses] = useState<Bus[]>(realtimeService.getBuses());
+  const [currentCollege, setCurrentCollege] = useState<College>(DEFAULT_COLLEGE);
+  const [buses, setBuses] = useState<Bus[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
-  const [trips, setTrips] = useState<Trip[]>(tripService.getTripHistory());
+  const [trips, setTrips] = useState<Trip[]>([]);
   const [activeTrip, setActiveTrip] = useState<Trip | null>(tripService.getActiveTrip());
-  const [notifications, setNotifications] = useState<CampusNotification[]>(notificationService.getNotifications());
-  const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyAlert[]>(adminService.getEmergencyAlerts());
+  const [notifications, setNotifications] = useState<CampusNotification[]>([]);
+  const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyAlert[]>([]);
   const [locationState, setLocationState] = useState<LocationServiceState>(locationService.getState());
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
 
+  const isAuthenticated = authService.isAuthenticated();
+
+  // Auth subscription
   useEffect(() => {
-    if (currentUser?.collegeId) {
-      const found = mockColleges.find((c) => c.id === currentUser.collegeId);
-      if (found) {
-        setCurrentCollege(found);
+    const unsubAuth = authService.subscribe((user) => {
+      setCurrentUser(user);
+      if (user) {
+        // Load data when user is authenticated
+        loadAllData();
+      } else {
+        // Clear all data on logout
+        setBuses([]);
+        setRoutes([]);
+        setTrips([]);
+        setActiveTrip(null);
+        setNotifications([]);
+        setEmergencyAlerts([]);
+        setIsLoadingData(false);
       }
-    }
-  }, [currentUser]);
+    });
+    return () => unsubAuth();
+  }, []);
 
+  // Data subscriptions (only when authenticated)
   useEffect(() => {
-    // Subscriptions
-    const unsubAuth = authService.subscribe(setCurrentUser);
+    if (!currentUser) return;
+
     const unsubBuses = realtimeService.subscribeBuses(setBuses);
     const unsubTrips = tripService.subscribeActiveTrip((trip) => {
       setActiveTrip(trip);
@@ -82,20 +109,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubNotif = notificationService.subscribe(setNotifications);
     const unsubAlerts = adminService.subscribeAlerts(setEmergencyAlerts);
 
-    // Initial load
-    routeService.getRoutes().then(setRoutes);
+    // Load data
+    loadAllData();
 
     return () => {
-      unsubAuth();
       unsubBuses();
       unsubTrips();
       unsubLoc();
       unsubNotif();
       unsubAlerts();
     };
-  }, []);
+  }, [currentUser]);
 
-  // Trip Recovery After Disconnect (Task 2.3)
+  // Trip Recovery After Disconnect (for drivers)
   useEffect(() => {
     const recoverActiveTrip = async () => {
       try {
@@ -131,12 +157,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const role: UserRole = currentUser?.role || 'STUDENT';
 
-  const switchRole = (newRole: UserRole) => {
-    authService.switchRole(newRole);
-  };
+  const loadAllData = async () => {
+    setIsLoadingData(true);
+    setDataError(null);
+    try {
+      const [busesResult, routesResult] = await Promise.all([
+        realtimeService.fetchBusesFromApi(),
+        routeService.getRoutes(),
+      ]);
 
-  const loginAs = async (targetRole: UserRole) => {
-    await authService.login('', targetRole);
+      if (routesResult) setRoutes(routesResult);
+      // Buses are auto-set through subscription
+
+      setIsLoadingData(false);
+    } catch (err: any) {
+      setDataError(err.message || 'Failed to load data.');
+      setIsLoadingData(false);
+    }
   };
 
   const logout = () => {
@@ -144,26 +181,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const switchCollege = (collegeId: string) => {
-    const found = mockColleges.find((c) => c.id === collegeId);
-    if (found) {
-      setCurrentCollege(found);
-    }
-  };
-
-  const toggleSimulatedOffline = (simulate: boolean) => {
-    locationService.toggleSimulatedOffline(simulate);
+    // In production, this would fetch the college data and associated resources
+    setCurrentCollege(DEFAULT_COLLEGE);
   };
 
   const refreshData = async () => {
-    const r = await routeService.getRoutes();
-    setRoutes(r);
+    await loadAllData();
     setBuses(realtimeService.getBuses());
     setTrips(tripService.getTripHistory());
-  };
-
-  const resetAllData = () => {
-    localStorage.clear();
-    window.location.reload();
   };
 
   const unreadCount = useMemo(
@@ -180,11 +205,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentUser,
     role,
     currentCollege,
-    colleges: mockColleges,
+    colleges: [DEFAULT_COLLEGE],
     switchCollege,
-    switchRole,
     logout,
-    loginAs,
+    isAuthenticated,
     buses,
     routes,
     trips,
@@ -193,10 +217,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     unreadCount,
     emergencyAlerts,
     activeEmergencyCount,
+    isLoadingData,
+    dataError,
     locationState,
-    toggleSimulatedOffline,
     refreshData,
-    resetAllData,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
