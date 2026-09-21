@@ -25,6 +25,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const routeLayersRef = useRef<Record<string, L.Polyline>>({});
   const stopMarkersRef = useRef<Record<string, L.Marker>>({});
 
+  const activeBusCount = buses.filter((b) => b.status === 'ACTIVE').length;
+
   useEffect(() => {
     if (!mapContainerRef.current) return;
     if (!mapInstanceRef.current) {
@@ -45,7 +47,6 @@ export const MapView: React.FC<MapViewProps> = ({
     if (!map) return;
     Object.values(routeLayersRef.current).forEach((p) => map.removeLayer(p));
     routeLayersRef.current = {};
-
     routes.forEach((route) => {
       const isSelected = selectedRouteId === route.id;
       const opacity = selectedRouteId ? (isSelected ? 0.9 : 0.25) : 0.7;
@@ -63,14 +64,12 @@ export const MapView: React.FC<MapViewProps> = ({
     if (!map) return;
     Object.values(stopMarkersRef.current).forEach((m) => map.removeLayer(m));
     stopMarkersRef.current = {};
-
     const stopsMap = new Map<string, Stop>();
     routes.forEach((r) => r.stops.forEach((s) => { if (!stopsMap.has(s.id)) stopsMap.set(s.id, s); }));
-
     stopsMap.forEach((stop) => {
       const stopIcon = L.divIcon({
         className: 'custom-stop-icon',
-        html: `<div class="relative flex items-center justify-center cursor-pointer" title="${stop.name}"><div class="w-3.5 h-3.5 rounded-full bg-white border-2 border-slate-700 shadow-md"></div></div>`,
+        html: `<div class="relative flex items-center justify-center cursor-pointer"><div class="w-3.5 h-3.5 rounded-full bg-white border-2 border-slate-700 shadow-md"></div></div>`,
         iconSize: [14, 14], iconAnchor: [7, 7],
       });
       const marker = L.marker([stop.lat, stop.lng], { icon: stopIcon }).addTo(map);
@@ -87,22 +86,19 @@ export const MapView: React.FC<MapViewProps> = ({
     Object.keys(busMarkersRef.current).forEach((id) => {
       if (!currentBusIds.has(id)) { map.removeLayer(busMarkersRef.current[id]); delete busMarkersRef.current[id]; }
     });
-
     buses.forEach((bus) => {
       if (bus.status === 'OFFLINE' || bus.status === 'MAINTENANCE') {
         if (busMarkersRef.current[bus.id]) { map.removeLayer(busMarkersRef.current[bus.id]); delete busMarkersRef.current[bus.id]; }
         return;
       }
       const isSelected = selectedBusId === bus.id;
-      const lat = bus.lastLocation.lat;
-      const lng = bus.lastLocation.lng;
+      const lat = bus.lastLocation.lat, lng = bus.lastLocation.lng;
       const heading = bus.heading || 0;
       const route = routes.find((r) => r.id === bus.currentRouteId);
       const routeColor = route ? route.color : '#2563EB';
-      const statusColor = bus.status === 'ACTIVE' ? 'bg-emerald-500' : bus.status === 'IDLE' ? 'bg-amber-500' : 'bg-slate-400';
-      const busIconHtml = `<div class="relative flex flex-col items-center justify-center cursor-pointer"><div class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white shadow-md mb-0.5 ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110' : ''}" style="background-color: ${routeColor};"><span class="w-1.5 h-1.5 rounded-full ${statusColor}"></span><span>${bus.busNumber}</span></div><div class="w-7 h-7 rounded-full bg-white shadow-lg border-2 border-slate-800 flex items-center justify-center text-slate-800 ${isSelected ? 'scale-115' : ''}"><div style="transform: rotate(${heading}deg);" class="transition-transform duration-500"><svg class="w-4 h-4 text-blue-600 fill-current" viewBox="0 0 24 24"><polygon points="12,2 22,22 12,17 2,22" /></svg></div></div></div>`;
+      const statusColor = bus.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-500';
+      const busIconHtml = `<div class="relative flex flex-col items-center cursor-pointer"><div class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white shadow-md mb-0.5 ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110' : ''}" style="background-color: ${routeColor};"><span class="w-1.5 h-1.5 rounded-full ${statusColor}"></span><span>${bus.busNumber}</span></div><div class="w-7 h-7 rounded-full bg-white shadow-lg border-2 border-slate-800 flex items-center justify-center ${isSelected ? 'scale-115' : ''}"><div style="transform: rotate(${heading}deg);" class="transition-transform duration-500"><svg class="w-4 h-4 text-blue-600 fill-current" viewBox="0 0 24 24"><polygon points="12,2 22,22 12,17 2,22" /></svg></div></div></div>`;
       const customIcon = L.divIcon({ className: 'bus-marker-wrapper', html: busIconHtml, iconSize: [50, 48], iconAnchor: [25, 40] });
-
       if (busMarkersRef.current[bus.id]) {
         busMarkersRef.current[bus.id].setLatLng([lat, lng]).setIcon(customIcon);
       } else {
@@ -128,11 +124,10 @@ export const MapView: React.FC<MapViewProps> = ({
   return (
     <div className={`relative w-full ${heightClass} ${className} rounded-2xl overflow-hidden border border-slate-200 shadow-sm`}>
       <div ref={mapContainerRef} className="w-full h-full z-0" />
-
       <div className="absolute top-3 left-3 z-10 bg-white/95 backdrop-blur-xs p-2.5 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-1.5 text-[11px] text-slate-700 max-w-[200px]">
         <div className="font-bold text-slate-900 border-b border-slate-100 pb-1 flex items-center justify-between gap-2">
           <span>Campus Fleet</span>
-          {activeBuses > 0 ? <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> : null}
+          {activeBusCount > 0 && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
         </div>
         {routes.slice(0, 5).map((r) => (
           <div key={r.id} className="flex items-center gap-2">
@@ -145,7 +140,3 @@ export const MapView: React.FC<MapViewProps> = ({
     </div>
   );
 };
-
-function activeBuses(buses: Bus[]): number {
-  return buses.filter((b) => b.status === 'ACTIVE').length;
-}
