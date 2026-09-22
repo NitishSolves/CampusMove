@@ -27,6 +27,14 @@ app.use(
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
+// Normalize request URL for Vercel Lambda function environment
+app.use((req, _res, next) => {
+  if (!req.url.startsWith('/api/') && req.url !== '/api') {
+    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
+  }
+  next();
+});
+
 let isDbInitialized = false;
 
 app.use(async (_req, _res, next) => {

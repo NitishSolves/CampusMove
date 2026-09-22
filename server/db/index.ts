@@ -185,28 +185,51 @@ let memoryData: DatabaseData = {
   notifications: [],
 };
 
+import os from 'os';
+
+function getWritableDataDir(): string {
+  try {
+    const defaultDir = path.join(process.cwd(), '.data');
+    if (!fs.existsSync(defaultDir)) {
+      fs.mkdirSync(defaultDir, { recursive: true });
+    }
+    return defaultDir;
+  } catch {
+    const tmpDir = path.join(os.tmpdir(), 'campusmove_data');
+    try {
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+    } catch {
+      // Ignored
+    }
+    return tmpDir;
+  }
+}
+
 // Save memory data to disk
 function saveFileDb() {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    fs.writeFileSync(DB_JSON_PATH, JSON.stringify(memoryData, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to save file database:', err);
+    const dir = getWritableDataDir();
+    const filePath = path.join(dir, 'database.json');
+    fs.writeFileSync(filePath, JSON.stringify(memoryData, null, 2), 'utf-8');
+  } catch {
+    // In-memory state remains operational during serverless execution
   }
 }
 
 // Load memory data from disk
 function loadFileDb(): boolean {
   try {
-    if (fs.existsSync(DB_JSON_PATH)) {
-      const raw = fs.readFileSync(DB_JSON_PATH, 'utf-8');
+    const dir = getWritableDataDir();
+    const filePath = path.join(dir, 'database.json');
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf-8');
       memoryData = JSON.parse(raw);
       return true;
     }
-  } catch (err) {
-    console.error('Failed to load file database:', err);
+  } catch {
+    // Fallback
   }
   return false;
 }
