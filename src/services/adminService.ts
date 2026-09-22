@@ -5,19 +5,14 @@ import { realtimeService } from './realtimeService';
 import { busService } from './busService';
 import { routeService } from './routeService';
 import { notificationService } from './notificationService';
-import { mockEmergencyAlerts } from '../mock/notifications';
-import { mockDrivers, mockStudents } from '../mock/users';
 
 class AdminService {
-  private alerts: EmergencyAlert[] = [...mockEmergencyAlerts];
-  private drivers: Driver[] = [...mockDrivers];
-  private students: Student[] = [...mockStudents];
+  private alerts: EmergencyAlert[] = [];
   private alertListeners: ((alerts: EmergencyAlert[]) => void)[] = [];
 
   constructor() {
     this.fetchAlertsFromApi();
 
-    // Listen to real-time alerts
     socketService.on('emergency:alert', (alert: EmergencyAlert) => {
       this.alerts.unshift(alert);
       this.notifyAlerts();
@@ -43,7 +38,7 @@ class AdminService {
         return this.alerts;
       }
     } catch {
-      // Offline fallback
+      // Offline fallback - use empty state
     }
     return this.alerts;
   }
@@ -124,14 +119,14 @@ class AdminService {
   public async resolveAlert(id: string, notes?: string): Promise<void> {
     try {
       await apiClient.put(`/api/alerts/${id}/resolve`, {
-        notes: notes || 'Incident resolved. Unit cleared for service.',
+        notes: notes || 'Incident resolved.',
       });
     } catch (err) {
       console.warn('Resolve API error:', err);
     }
 
     this.alerts = this.alerts.map((a) =>
-      a.id === id ? { ...a, status: 'RESOLVED', resolvedAt: new Date().toISOString(), reason: notes || a.reason } : a
+      a.id === id ? { ...a, status: 'RESOLVED', resolvedAt: new Date().toISOString() } : a
     );
     this.notifyAlerts();
   }
@@ -182,7 +177,7 @@ class AdminService {
     let totalCapacity = 0;
     buses.filter((b) => b.status === 'ACTIVE').forEach((b) => {
       totalOccupancy += b.currentOccupancy || 0;
-      totalCapacity += b.capacity || 45;
+      totalCapacity += b.capacity || 0;
     });
 
     const averageOccupancyPercent = totalCapacity > 0 ? Math.round((totalOccupancy / totalCapacity) * 100) : 0;
@@ -197,17 +192,29 @@ class AdminService {
       activeTripsCount: activeBuses,
       averageOccupancyPercent,
       activeEmergenciesCount: activeEmergencies,
-      onTimePerformanceRate: 94.8,
-      totalPassengersMovedToday: 3485 + totalOccupancy,
+      onTimePerformanceRate: 0,
+      totalPassengersMovedToday: 0,
     };
   }
 
-  public getDrivers(): Driver[] {
-    return [...this.drivers];
+  public async getDrivers(): Promise<Driver[]> {
+    try {
+      const data = await apiClient.get<Driver[]>('/api/admin/drivers');
+      if (Array.isArray(data)) return data;
+    } catch {
+      // Return empty if API unavailable
+    }
+    return [];
   }
 
-  public getStudents(): Student[] {
-    return [...this.students];
+  public async getStudents(): Promise<Student[]> {
+    try {
+      const data = await apiClient.get<Student[]>('/api/admin/students');
+      if (Array.isArray(data)) return data;
+    } catch {
+      // Return empty if API unavailable
+    }
+    return [];
   }
 
   private notifyAlerts(): void {

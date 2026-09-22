@@ -21,16 +21,16 @@ class AuthService {
     // If user has token, verify profile with backend asynchronously
     if (getStoredToken()) {
       this.validateSession();
-    } else {
-      // Default demo user on fresh visit
-      this.login('alex.chen@apex.edu', 'ApexBus2025!').catch(() => {
-        // Fallback default
-      });
     }
+    // No longer auto-login as demo user
   }
 
   public getCurrentUser(): User | null {
     return this.currentUser;
+  }
+
+  public isAuthenticated(): boolean {
+    return !!this.currentUser && !!getStoredToken();
   }
 
   public subscribe(listener: (user: User | null) => void): () => void {
@@ -43,7 +43,7 @@ class AuthService {
 
   public async login(
     email: string,
-    password = 'ApexBus2025!'
+    password: string
   ): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
       const res = await apiClient.post<{ token: string; user: User }>('/api/auth/login', {
@@ -56,13 +56,12 @@ class AuthService {
       this.saveSession();
       this.notifyListeners();
 
-      // Connect or join socket room for user's college
+      // Connect socket for user's college
       socketService.connect(res.user.collegeId);
 
       return { success: true, user: res.user };
     } catch (err: any) {
-      console.warn('API Login error:', err.message);
-      return { success: false, error: err.message || 'Login failed.' };
+      return { success: false, error: err.message || 'Login failed. Please check your credentials.' };
     }
   }
 
@@ -84,29 +83,12 @@ class AuthService {
       this.saveSession();
       this.notifyListeners();
 
-      // Connect socket
       socketService.connect(res.user.collegeId);
 
       return { success: true, user: res.user };
     } catch (err: any) {
-      console.warn('API Register error:', err.message);
       return { success: false, error: err.message || 'Registration failed.' };
     }
-  }
-
-  public async switchRole(role: UserRole): Promise<User | null> {
-    const roleCreds: Record<UserRole, { email: string; pass: string }> = {
-      STUDENT: { email: 'alex.chen@apex.edu', pass: 'ApexBus2025!' },
-      DRIVER: { email: 'marcus.vance@transit.apex.edu', pass: 'ApexBus2025!' },
-      ADMIN: { email: 'admin@apex.edu', pass: 'ApexBus2025!' },
-    };
-
-    const creds = roleCreds[role];
-    if (creds) {
-      const res = await this.login(creds.email, creds.pass);
-      return res.user || null;
-    }
-    return null;
   }
 
   public logout(): void {
@@ -115,18 +97,6 @@ class AuthService {
     localStorage.removeItem(AUTH_STORAGE_KEY);
     socketService.disconnect();
     this.notifyListeners();
-  }
-
-  public async getDemoAccounts(): Promise<{ role: UserRole; name: string; email: string; hint: string }[]> {
-    try {
-      return await apiClient.get('/api/auth/demo-accounts');
-    } catch {
-      return [
-        { role: 'STUDENT', name: 'Alex Chen', email: 'alex.chen@apex.edu', hint: 'View live bus map, routes & ETAs' },
-        { role: 'DRIVER', name: 'Marcus Vance', email: 'marcus.vance@transit.apex.edu', hint: 'Real GPS trip tracking & offline sync' },
-        { role: 'ADMIN', name: 'Sarah Jenkins', email: 'admin@apex.edu', hint: 'Fleet map, routes, buses & announcements' },
-      ];
-    }
   }
 
   private async validateSession(): Promise<void> {
