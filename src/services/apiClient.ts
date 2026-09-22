@@ -44,16 +44,20 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers,
   });
 
+  const contentType = response.headers.get('content-type') || '';
+
   if (!response.ok) {
-    let errMessage = `HTTP error ${response.status}: ${response.statusText}`;
+    let errMessage = `HTTP error ${response.status}${response.statusText ? `: ${response.statusText}` : ''}`;
     let errData: any = null;
-    try {
-      errData = await response.json();
-      if (errData?.error) {
-        errMessage = errData.error;
+    if (contentType.includes('application/json')) {
+      try {
+        errData = await response.json();
+        if (errData?.error) {
+          errMessage = errData.error;
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Not JSON response
     }
 
     if (response.status === 401) {
@@ -68,7 +72,19 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     return {} as T;
   }
 
-  return response.json();
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ApiError(
+      `Server returned non-JSON response (${contentType || 'text/html'}). Check API server route.`,
+      response.status
+    );
+  }
 }
 
 export const apiClient = {

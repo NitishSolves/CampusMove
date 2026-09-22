@@ -53,9 +53,11 @@ interface AppContextType {
 
   // Location / GPS / Network
   locationState: LocationServiceState;
+  toggleSimulatedOffline: (simulateOffline: boolean) => void;
 
   // Refresh & Reset
   refreshData: () => Promise<void>;
+  resetAllData: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -201,6 +203,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [emergencyAlerts]
   );
 
+  const toggleSimulatedOffline = (simulateOffline: boolean) => {
+    locationService.toggleSimulatedOffline(simulateOffline);
+  };
+
+  const resetAllData = async () => {
+    localStorage.clear();
+    locationService.stopTracking();
+    await loadAllData();
+  };
+
   const value: AppContextType = {
     currentUser,
     role,
@@ -220,7 +232,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isLoadingData,
     dataError,
     locationState,
+    toggleSimulatedOffline,
     refreshData,
+    resetAllData,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

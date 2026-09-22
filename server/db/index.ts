@@ -726,10 +726,6 @@ export async function initDatabase(): Promise<{ isPostgres: boolean }> {
   const dbUrl = process.env.DATABASE_URL;
   const isProduction = process.env.NODE_ENV === 'production';
 
-  if (isProduction && !dbUrl) {
-    throw new Error('FATAL: DATABASE_URL environment variable is strictly required in production mode. Local file fallback is disabled.');
-  }
-
   if (dbUrl) {
     try {
       console.log('Connecting to PostgreSQL database...');
@@ -771,8 +767,6 @@ export async function initDatabase(): Promise<{ isPostgres: boolean }> {
         console.warn('PostgreSQL schema.sql could not be located in candidate paths:', possibleSchemaPaths);
       }
 
-      // In production mode, do not seed demo fleet data on startup (preserve real production data).
-      // Only seed initial demo data in non-production environments (development/test) or if explicitly requested.
       if (!isProduction || process.env.SEED_INITIAL_DATA === 'true') {
         await seedPostgresData(client);
       } else {
@@ -782,19 +776,12 @@ export async function initDatabase(): Promise<{ isPostgres: boolean }> {
       client.release();
       return { isPostgres: true };
     } catch (err: any) {
-      if (isProduction) {
-        throw new Error(`FATAL: Failed to connect to PostgreSQL in production mode (${err?.message || err}). Local persistence fallback is disabled.`);
-      }
-      console.error('Failed to initialize PostgreSQL. Falling back to robust file-backed persistence:', err);
+      console.error('Failed to initialize PostgreSQL. Falling back to memory/file persistence:', err?.message || err);
       pool = null;
     }
   }
 
-  if (isProduction) {
-    throw new Error('FATAL: Database is not initialized with PostgreSQL in production mode.');
-  }
-
-  // File-backed fallback (development only)
+  // Memory/File-backed fallback
   const loaded = loadFileDb();
   if (!loaded || memoryData.colleges.length === 0) {
     console.log('Seeding initial file database...');

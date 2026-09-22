@@ -22,6 +22,7 @@ class LocationService {
   private simulationInterval: number | null = null;
   private syncInterval: number | null = null;
   private isSyncing = false;
+  private consecutiveFailures = 0;
   private listeners: StateListener[] = [];
 
   private currentTripId: string | null = null;
@@ -239,11 +240,16 @@ class LocationService {
 
   public async attemptSyncQueuedLocations(): Promise<void> {
     if (this.isSyncing) return;
+    if (this.consecutiveFailures >= 5) {
+      // Pause automatic polling if server endpoint is continuously failing
+      return;
+    }
 
     const queuedItems = await offlineQueueService.getAll(100);
     if (queuedItems.length === 0) {
       this.state.queuedCount = 0;
       this.state.errorMessage = null;
+      this.consecutiveFailures = 0;
       return;
     }
 
@@ -274,12 +280,21 @@ class LocationService {
       } else if (syncRes && (!syncRes.failedIndices || syncRes.failedIndices.length === 0)) {
         await offlineQueueService.remove(queuedItems.map((q) => q.id));
       }
+      this.consecutiveFailures = 0;
       this.state.queuedCount = await offlineQueueService.getCount();
       this.state.networkStatus = 'NETWORK_ONLINE';
       this.state.lastSyncTime = new Date().toISOString();
       this.state.errorMessage = null;
     } catch (err: any) {
-      console.warn('Sync queued locations error:', err);
+      this.consecutiveFailures++;
+
+      if (err.status === 405 || err.status === 404) {
+        console.warn(`Telemetry sync endpoint returned HTTP ${err.status}. Pausing retry.`);
+        await offlineQueueService.incrementAttempts(queuedItems.map((q) => q.id));
+      } else {
+        console.warn('Sync queued locations error:', err);
+      }
+
       this.state.networkStatus = 'LOCATION_QUEUED';
       this.state.errorMessage = `Telemetry sync warning: ${err.message || 'Transmission failed, retrying shortly.'}`;
 
@@ -290,19 +305,11 @@ class LocationService {
           console.warn('Pruning unrecoverable location record from queue:', badItem.id);
           await offlineQueueService.remove([badItem.id]);
         }
-      } else {
-        // Increment attempts on the batch; auto-prunes dead-letter points after threshold
+      } else if (err.status !== 405 && err.status !== 404) {
         await offlineQueueService.incrementAttempts(queuedItems.map((q) => q.id));
       }
 
       this.state.queuedCount = await offlineQueueService.getCount();
-
-      // Schedule retry with exponential backoff if online
-      if (navigator.onLine && !this.state.isSimulatedOffline) {
-        window.setTimeout(() => {
-          this.attemptSyncQueuedLocations();
-        }, 5000);
-      }
     } finally {
       this.isSyncing = false;
       this.notify();
@@ -313,6 +320,7 @@ class LocationService {
     if (this.state.isSimulatedOffline) return;
 
     if (isOnline) {
+      this.consecutiveFailures = 0;
       this.state.networkStatus = 'NETWORK_ONLINE';
       this.attemptSyncQueuedLocations();
     } else {
