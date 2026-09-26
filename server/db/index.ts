@@ -95,6 +95,45 @@ export interface BusRecord {
   updated_at: string;
 }
 
+export interface ScheduleRecord {
+  id: string;
+  college_id: string;
+  bus_id: string;
+  route_id: string;
+  departure_time: string;
+  arrival_time?: string;
+  operating_days: string[];
+  status: "ACTIVE" | "INACTIVE" | "CANCELLED";
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplaintRecord {
+  id: string;
+  college_id: string;
+  student_id: string;
+  trip_id?: string;
+  bus_id?: string;
+  route_id?: string;
+  title: string;
+  description: string;
+  category:
+    | "DRIVER_BEHAVIOR"
+    | "VEHICLE_CONDITION"
+    | "SCHEDULE_ISSUE"
+    | "CLEANLINESS"
+    | "SAFETY"
+    | "OTHER";
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  priority: "LOW" | "NORMAL" | "HIGH";
+  admin_response?: string;
+  admin_id?: string;
+  responded_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TripRecord {
   id: string;
   college_id: string;
@@ -902,6 +941,357 @@ export async function seedPostgresData(client: pg.PoolClient) {
     );
   }
 }
+export interface ScheduleRecord {
+  id: string;
+  college_id: string;
+  bus_id: string;
+  route_id: string;
+  departure_time: string; // HH:mm format
+  arrival_time?: string;
+  operating_days: string[]; // e.g., ["Monday", "Tuesday", ...]
+  status: 'ACTIVE' | 'INACTIVE' | 'CANCELLED';
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplaintRecord {
+  id: string;
+  college_id: string;
+  student_id: string;
+  trip_id?: string;
+  bus_id?: string;
+  route_id?: string;
+  title: string;
+  description: string;
+  category: 'DRIVER_BEHAVIOR' | 'VEHICLE_CONDITION' | 'SCHEDULE_ISSUE' | 'CLEANLINESS' | 'SAFETY' | 'OTHER';
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  priority: 'LOW' | 'NORMAL' | 'HIGH';
+  admin_response?: string;
+  admin_id?: string;
+  responded_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================
+// SCHEDULES - Database Functions
+// ============================================
+
+export async function getSchedules(collegeId: string, busId?: string, routeId?: string, operatingDay?: string): Promise<ScheduleRecord[]> {
+  if (pool) {
+    try {
+      let query = 'SELECT * FROM schedules WHERE college_id = $1';
+      const params: any[] = [collegeId];
+
+      if (busId) {
+        query += ` AND bus_id = $${params.length + 1}`;
+        params.push(busId);
+      }
+      if (routeId) {
+        query += ` AND route_id = $${params.length + 1}`;
+        params.push(routeId);
+      }
+      // Filter by day if provided (Monday, Tuesday, etc.)
+      if (operatingDay) {
+        query += ` AND operating_days @> $${params.length + 1}::jsonb`;
+        params.push(JSON.stringify(operatingDay));
+      }
+
+      query += ' ORDER BY departure_time ASC';
+      const result = await pool.query(query, params);
+      return result.rows as ScheduleRecord[];
+    } catch (error) {
+      console.error('Database error fetching schedules:', error);
+      throw error;
+    }
+  } else {
+    const records: ScheduleRecord[] = getFileBackedData('schedules') || [];
+    return records.filter((s) => {
+      if (s.college_id !== collegeId) return false;
+      if (busId && s.bus_id !== busId) return false;
+      if (routeId && s.route_id !== routeId) return false;
+      if (operatingDay && !s.operating_days.includes(operatingDay)) return false;
+      return true;
+    });
+  }
+}
+
+export async function getScheduleById(scheduleId: string, collegeId: string): Promise<ScheduleRecord | null> {
+  if (pool) {
+    try {
+      const result = await pool.query(
+        'SELECT * FROM schedules WHERE id = $1 AND college_id = $2',
+        [scheduleId, collegeId]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Database error fetching schedule:', error);
+      throw error;
+    }
+  } else {
+    const records: ScheduleRecord[] = getFileBackedData('schedules') || [];
+    return records.find((s) => s.id === scheduleId && s.college_id === collegeId) || null;
+  }
+}
+
+export async function createSchedule(schedule: ScheduleRecord): Promise<ScheduleRecord> {
+  if (pool) {
+    try {
+      const result = await pool.query(
+        `INSERT INTO schedules
+        (id, college_id, bus_id, route_id, departure_time, arrival_time, operating_days, status, notes, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING *`,
+        [
+          schedule.id,
+          schedule.college_id,
+          schedule.bus_id,
+          schedule.route_id,
+          schedule.departure_time,
+          schedule.arrival_time || null,
+          JSON.stringify(schedule.operating_days),
+          schedule.status,
+          schedule.notes || null,
+          schedule.created_at,
+          schedule.updated_at,
+        ]
+      );
+      return result.rows[0];
+    } catch (error) {
+      console.error('Database error creating schedule:', error);
+      throw error;
+    }
+  } else {
+    const records: ScheduleRecord[] = getFileBackedData('schedules') || [];
+    records.push(schedule);
+    setFileBackedData('schedules', records);
+    return schedule;
+  }
+}
+
+export async function updateSchedule(scheduleId: string, collegeId: string, updates: Partial<ScheduleRecord>): Promise<ScheduleRecord | null> {
+  if (pool) {
+    try {
+      const allowed = ['departure_time', 'arrival_time', 'operating_days', 'status', 'notes'];
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      for (const [key, value] of Object.entries(updates)) {
+        if (allowed.includes(key)) {
+          setClauses.push(`${key} = $${paramIndex}`);
+          values.push(key === 'operating_days' ? JSON.stringify(value) : value);
+          paramIndex++;
+        }
+      }
+
+      if (setClauses.length === 0) return getScheduleById(scheduleId, collegeId);
+
+      setClauses.push(`updated_at = $${paramIndex}`);
+      values.push(new Date().toISOString());
+      paramIndex++;
+
+      values.push(scheduleId, collegeId);
+
+      const result = await pool.query(
+        `UPDATE schedules SET ${setClauses.join(', ')} WHERE id = $${paramIndex} AND college_id = $${paramIndex + 1} RETURNING *`,
+        values
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Database error updating schedule:', error);
+      throw error;
+    }
+  } else {
+    const records: ScheduleRecord[] = getFileBackedData('schedules') || [];
+    const index = records.findIndex((s) => s.id === scheduleId && s.college_id === collegeId);
+    if (index === -1) return null;
+    records[index] = { ...records[index], ...updates, updated_at: new Date().toISOString() };
+    setFileBackedData('schedules', records);
+    return records[index];
+  }
+}
+
+export async function deleteSchedule(scheduleId: string, collegeId: string): Promise<boolean> {
+  if (pool) {
+    try {
+      const result = await pool.query(
+        'DELETE FROM schedules WHERE id = $1 AND college_id = $2 RETURNING id',
+        [scheduleId, collegeId]
+      );
+      return result.rowCount !== 0;
+    } catch (error) {
+      console.error('Database error deleting schedule:', error);
+      throw error;
+    }
+  } else {
+    const records: ScheduleRecord[] = getFileBackedData('schedules') || [];
+    const index = records.findIndex((s) => s.id === scheduleId && s.college_id === collegeId);
+    if (index === -1) return false;
+    records.splice(index, 1);
+    setFileBackedData('schedules', records);
+    return true;
+  }
+}
+
+// ============================================
+// COMPLAINTS - Database Functions
+// ============================================
+
+export async function getComplaints(collegeId: string, studentId?: string, status?: string): Promise<ComplaintRecord[]> {
+  if (pool) {
+    try {
+      let query = 'SELECT * FROM complaints WHERE college_id = $1';
+      const params: any[] = [collegeId];
+
+      if (studentId) {
+        query += ` AND student_id = $${params.length + 1}`;
+        params.push(studentId);
+      }
+      if (status) {
+        query += ` AND status = $${params.length + 1}`;
+        params.push(status);
+      }
+
+      query += ' ORDER BY created_at DESC';
+      const result = await pool.query(query, params);
+      return result.rows as ComplaintRecord[];
+    } catch (error) {
+      console.error('Database error fetching complaints:', error);
+      throw error;
+    }
+  } else {
+    const records: ComplaintRecord[] = getFileBackedData('complaints') || [];
+    return records.filter((c) => {
+      if (c.college_id !== collegeId) return false;
+      if (studentId && c.student_id !== studentId) return false;
+      if (status && c.status !== status) return false;
+      return true;
+    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+}
+
+export async function getComplaintById(complaintId: string, collegeId: string): Promise<ComplaintRecord | null> {
+  if (pool) {
+    try {
+      const result = await pool.query(
+        'SELECT * FROM complaints WHERE id = $1 AND college_id = $2',
+        [complaintId, collegeId]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Database error fetching complaint:', error);
+      throw error;
+    }
+  } else {
+    const records: ComplaintRecord[] = getFileBackedData('complaints') || [];
+    return records.find((c) => c.id === complaintId && c.college_id === collegeId) || null;
+  }
+}
+
+export async function createComplaint(complaint: ComplaintRecord): Promise<ComplaintRecord> {
+  if (pool) {
+    try {
+      const result = await pool.query(
+        `INSERT INTO complaints
+        (id, college_id, student_id, trip_id, bus_id, route_id, title, description, category, status, priority, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING *`,
+        [
+          complaint.id,
+          complaint.college_id,
+          complaint.student_id,
+          complaint.trip_id || null,
+          complaint.bus_id || null,
+          complaint.route_id || null,
+          complaint.title,
+          complaint.description,
+          complaint.category,
+          complaint.status,
+          complaint.priority,
+          complaint.created_at,
+          complaint.updated_at,
+        ]
+      );
+      return result.rows[0];
+    } catch (error) {
+      console.error('Database error creating complaint:', error);
+      throw error;
+    }
+  } else {
+    const records: ComplaintRecord[] = getFileBackedData('complaints') || [];
+    records.push(complaint);
+    setFileBackedData('complaints', records);
+    return complaint;
+  }
+}
+
+export async function updateComplaint(complaintId: string, collegeId: string, updates: Partial<ComplaintRecord>): Promise<ComplaintRecord | null> {
+  if (pool) {
+    try {
+      const allowed = ['status', 'admin_response', 'admin_id', 'responded_at', 'priority'];
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      for (const [key, value] of Object.entries(updates)) {
+        if (allowed.includes(key)) {
+          setClauses.push(`${key} = $${paramIndex}`);
+          values.push(value);
+          paramIndex++;
+        }
+      }
+
+      if (setClauses.length === 0) return getComplaintById(complaintId, collegeId);
+
+      setClauses.push(`updated_at = $${paramIndex}`);
+      values.push(new Date().toISOString());
+      paramIndex++;
+
+      values.push(complaintId, collegeId);
+
+      const result = await pool.query(
+        `UPDATE complaints SET ${setClauses.join(', ')} WHERE id = $${paramIndex} AND college_id = $${paramIndex + 1} RETURNING *`,
+        values
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Database error updating complaint:', error);
+      throw error;
+    }
+  } else {
+    const records: ComplaintRecord[] = getFileBackedData('complaints') || [];
+    const index = records.findIndex((c) => c.id === complaintId && c.college_id === collegeId);
+    if (index === -1) return null;
+    records[index] = { ...records[index], ...updates, updated_at: new Date().toISOString() };
+    setFileBackedData('complaints', records);
+    return records[index];
+  }
+}
+
+export async function deleteComplaint(complaintId: string, collegeId: string): Promise<boolean> {
+  if (pool) {
+    try {
+      const result = await pool.query(
+        'DELETE FROM complaints WHERE id = $1 AND college_id = $2 RETURNING id',
+        [complaintId, collegeId]
+      );
+      return result.rowCount !== 0;
+    } catch (error) {
+      console.error('Database error deleting complaint:', error);
+      throw error;
+    }
+  } else {
+    const records: ComplaintRecord[] = getFileBackedData('complaints') || [];
+    const index = records.findIndex((c) => c.id === complaintId && c.college_id === collegeId);
+    if (index === -1) return false;
+    records.splice(index, 1);
+    setFileBackedData('complaints', records);
+    return true;
+  }
+}
+
 
 // -------------------------------------------------------------
 // Unified Repository Operations (Auto-routes to Postgres or Memory)

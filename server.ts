@@ -9,6 +9,8 @@ import { initDatabase, checkDatabaseHealth } from './server/db';
 import { initSocketIO } from './server/socket';
 import authRoutes from './server/routes/auth';
 import collegeRoutes from './server/routes/colleges';
+import scheduleRoutes from "./server/routes/schedules";
+import complaintRoutes from "./server/routes/complaints";
 import busRoutes from './server/routes/buses';
 import routeRoutes from './server/routes/routes';
 import tripRoutes from './server/routes/trips';
@@ -149,6 +151,8 @@ async function startServer() {
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/alerts', alertRoutes);
   app.use('/api/analytics', analyticsRoutes);
+  app.use("/api/schedules", scheduleRoutes);
+  app.use("/api/complaints", complaintRoutes);
 
   // Development vs Production Frontend Serving
   if (process.env.NODE_ENV !== 'production') {

@@ -27,6 +27,14 @@ export const MobileNavigation: React.FC = () => {
     { to: '/student/live', label: 'Live Map', icon: Navigation },
     { to: '/student/routes', label: 'Routes', icon: RouteIcon },
     { to: '/student/notifications', label: 'Alerts', icon: Bell, badge: unreadCount },
+    <NavLink to="/student/schedules" className={navLinkClass}>
+  <Calendar className="w-5 h-5" />
+  <span>Schedules</span>
+</NavLink>
+<NavLink to="/student/complaints" className={navLinkClass}>
+  <MessageSquare className="w-5 h-5" />
+  <span>Feedback</span>
+</NavLink>
   ];
 
   const driverItems: NavItem[] = [
@@ -41,6 +49,14 @@ export const MobileNavigation: React.FC = () => {
     { to: '/admin/buses', label: 'Buses', icon: Bus },
     { to: '/admin/routes', label: 'Routes', icon: RouteIcon },
     { to: '/admin/alerts', label: 'Alerts', icon: ShieldAlert, badge: activeEmergencyCount },
+    <NavLink to="/admin/schedules" className={navLinkClass}>
+  <Calendar className="w-5 h-5" />
+  <span>Schedules</span>
+</NavLink>
+<NavLink to="/admin/complaints" className={navLinkClass}>
+  <MessageSquare className="w-5 h-5" />
+  <span>Complaints</span>
+</NavLink>
   ];
 
   const items = role === 'ADMIN' ? adminItems : role === 'DRIVER' ? driverItems : studentItems;

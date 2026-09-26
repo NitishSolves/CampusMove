@@ -1,25 +1,29 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AppProvider } from './store/AppContext';
-import { AppShell } from './components/layout/AppShell';
-import { LandingPage } from './pages/LandingPage';
-import { LoginPage } from './pages/auth/LoginPage';
-import { StudentDashboard } from './pages/student/StudentDashboard';
-import { StudentLiveBuses } from './pages/student/StudentLiveBuses';
-import { StudentRoutes } from './pages/student/StudentRoutes';
-import { StudentNotifications } from './pages/student/StudentNotifications';
-import { StudentProfile } from './pages/student/StudentProfile';
-import { DriverDashboard } from './pages/driver/DriverDashboard';
-import { DriverHistory } from './pages/driver/DriverHistory';
-import { DriverProfile } from './pages/driver/DriverProfile';
-import { AdminDashboard } from './pages/admin/AdminDashboard';
-import { AdminLiveFleet } from './pages/admin/AdminLiveFleet';
-import { AdminBuses } from './pages/admin/AdminBuses';
-import { AdminRoutes } from './pages/admin/AdminRoutes';
-import { AdminDirectory } from './pages/admin/AdminDirectory';
-import { AdminAlerts } from './pages/admin/AdminAlerts';
-import { AdminAnalytics } from './pages/admin/AdminAnalytics';
-import { AdminSettings } from './pages/admin/AdminSettings';
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AppProvider } from "./store/AppContext";
+import { AppShell } from "./components/layout/AppShell";
+import { LandingPage } from "./pages/LandingPage";
+import { LoginPage } from "./pages/auth/LoginPage";
+import { StudentDashboard } from "./pages/student/StudentDashboard";
+import { StudentLiveBuses } from "./pages/student/StudentLiveBuses";
+import { StudentRoutes } from "./pages/student/StudentRoutes";
+import { StudentNotifications } from "./pages/student/StudentNotifications";
+import { StudentProfile } from "./pages/student/StudentProfile";
+import { DriverDashboard } from "./pages/driver/DriverDashboard";
+import { DriverHistory } from "./pages/driver/DriverHistory";
+import { DriverProfile } from "./pages/driver/DriverProfile";
+import { AdminDashboard } from "./pages/admin/AdminDashboard";
+import { AdminLiveFleet } from "./pages/admin/AdminLiveFleet";
+import { AdminBuses } from "./pages/admin/AdminBuses";
+import { AdminRoutes } from "./pages/admin/AdminRoutes";
+import { AdminDirectory } from "./pages/admin/AdminDirectory";
+import { AdminAlerts } from "./pages/admin/AdminAlerts";
+import { AdminAnalytics } from "./pages/admin/AdminAnalytics";
+import { AdminSettings } from "./pages/admin/AdminSettings";
+import  StudentSchedules  from "./pages/student/StudentSchedules";
+import StudentComplaints from "./pages/student/StudentComplaints";
+import AdminSchedules from "./pages/admin/AdminSchedules";
+import AdminComplaints from "./pages/admin/AdminComplaints";
 
 export default function App() {
   return (
@@ -32,7 +36,12 @@ export default function App() {
             <Route path="/student" element={<StudentDashboard />} />
             <Route path="/student/live" element={<StudentLiveBuses />} />
             <Route path="/student/routes" element={<StudentRoutes />} />
-            <Route path="/student/notifications" element={<StudentNotifications />} />
+            <Route path="/student/schedules" element={<StudentSchedules />} />
+            <Route path="/student/complaints" element={<StudentComplaints />} />
+            <Route
+              path="/student/notifications"
+              element={<StudentNotifications />}
+            />
             <Route path="/student/profile" element={<StudentProfile />} />
             <Route path="/driver" element={<DriverDashboard />} />
             <Route path="/driver/history" element={<DriverHistory />} />
@@ -45,6 +54,8 @@ export default function App() {
             <Route path="/admin/alerts" element={<AdminAlerts />} />
             <Route path="/admin/analytics" element={<AdminAnalytics />} />
             <Route path="/admin/settings" element={<AdminSettings />} />
+            <Route path="/admin/schedules" element={<AdminSchedules />} />
+            <Route path="/admin/complaints" element={<AdminComplaints />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
